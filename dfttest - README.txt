@@ -2,7 +2,7 @@
                                        dfttest v1.9.4.1
                                        Original code by tritical
                                        16-bit modification by Firesledge
-									   Avs+ port by DJATOM
+                                       Avs+ port by DJATOM
 
 Info:
 
