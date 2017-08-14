@@ -95,7 +95,7 @@ void proc0_C(const unsigned char *s0, const float *s1, float *d,
 void proc0_SSE_4(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
-	__asm
+	/*__asm
 	{
 		mov esi,s0
 		mov edi,s1
@@ -126,13 +126,21 @@ vloop:
 		sub eax,1
 		jnz uloop
 		emms
+	}*/
+	for (int u = 0; u<p1; ++u)
+	{
+		for (int v = 0; v<p1; ++v)
+			d[v] = s0[v] * s1[v];
+		s0 += p0;
+		s1 += p1;
+		d += p1;
 	}
 }
 
 void proc0_SSE2_4(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
-	__asm
+	/*__asm
 	{
 		mov esi,s0
 		mov edi,s1
@@ -158,13 +166,21 @@ vloop:
 		lea edx,[edx+ecx*4]
 		sub eax,1
 		jnz uloop
+	}*/
+	for (int u = 0; u<p1; ++u)
+	{
+		for (int v = 0; v<p1; ++v)
+			d[v] = s0[v] * s1[v];
+		s0 += p0;
+		s1 += p1;
+		d += p1;
 	}
 }
 
 void proc0_SSE_8(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
-	__asm
+	/*__asm
 	{
 		mov esi,s0
 		mov edi,s1
@@ -205,13 +221,21 @@ vloop:
 		sub eax,1
 		jnz uloop
 		emms
+	}*/
+	for (int u = 0; u<p1; ++u)
+	{
+		for (int v = 0; v<p1; ++v)
+			d[v] = s0[v] * s1[v];
+		s0 += p0;
+		s1 += p1;
+		d += p1;
 	}
 }
 
 void proc0_SSE2_8(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
-	__asm
+	/*__asm
 	{
 		mov esi,s0
 		mov edi,s1
@@ -242,6 +266,14 @@ vloop:
 		lea edx,[edx+ecx*4]
 		sub eax,1
 		jnz uloop
+	}*/
+	for (int u = 0; u<p1; ++u)
+	{
+		for (int v = 0; v<p1; ++v)
+			d[v] = s0[v] * s1[v];
+		s0 += p0;
+		s1 += p1;
+		d += p1;
 	}
 }
 
@@ -279,7 +311,7 @@ void proc1_C(const float *s0, const float *s1, float *d,
 void proc1_SSE_4(const float *s0, const float *s1, float *d,
 	const int p0, const int p1)
 {
-	__asm
+	/*__asm
 	{
 		mov esi,s0
 		mov edi,s1
@@ -304,13 +336,21 @@ vloop:
 		lea edx,[edx+ecx*4]
 		sub eax,1
 		jnz uloop
+	}*/
+	for (int u = 0; u<p0; ++u)
+	{
+		for (int v = 0; v<p0; ++v)
+			d[v] += s0[v] * s1[v];
+		s0 += p0;
+		s1 += p0;
+		d += p1;
 	}
 }
 
 void proc1_SSE_8(const float *s0, const float *s1, float *d,
 	const int p0, const int p1)
 {
-	__asm
+	/*__asm
 	{
 		mov esi,s0
 		mov edi,s1
@@ -340,6 +380,14 @@ vloop:
 		lea edx,[edx+ecx*4]
 		sub eax,1
 		jnz uloop
+	}*/
+	for (int u = 0; u<p0; ++u)
+	{
+		for (int v = 0; v<p0; ++v)
+			d[v] += s0[v] * s1[v];
+		s0 += p0;
+		s1 += p0;
+		d += p1;
 	}
 }
 
@@ -558,15 +606,7 @@ void intcast_C_16_bits(const float *p, unsigned char *dst, unsigned char *dst_ls
 		{
 			const float		vf = p [x] * 256;
 			int				v;
-#if ! defined (_WIN64)
-			__asm
-			{
-				fld				vf
-				fistp				v
-			}
-#else
 			v = int (vf + 0.5f);
-#endif
 			v = min (max (v, 0), 65535);
 			dst [x] = static_cast <unsigned char> (v >> 8);
 			dst_lsb [x] = static_cast <unsigned char> (v);
@@ -620,7 +660,7 @@ void dither_C(const float *p, unsigned char *dst, const int src_height,
 void intcast_SSE_1(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width)
 {
-	_asm
+	/*_asm
 	{
 		mov edx,p
 		mov ecx,dst
@@ -650,13 +690,20 @@ writeb:
 		lea edx,[edx+edi*4]
 		sub esi,1
 		jnz yloop
+	}*/
+	for (int y = 0; y<src_height; ++y)
+	{
+		for (int x = 0; x<src_width; ++x)
+			dst[x] = min(max((int)(p[x] + 0.5f), 0), 255);
+		p += width;
+		dst += dst_pitch;
 	}
 }
 
 void intcast_SSE2_8(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width)
 {
-	_asm
+	/*_asm
 	{
 		mov edx,p
 		mov ecx,dst
@@ -686,6 +733,13 @@ xloop:
 		lea edx,[edx+edi*4]
 		sub esi,1
 		jnz yloop
+	}*/
+	for (int y = 0; y<src_height; ++y)
+	{
+		for (int x = 0; x<src_width; ++x)
+			dst[x] = min(max((int)(p[x] + 0.5f), 0), 255);
+		p += width;
+		dst += dst_pitch;
 	}
 }
 
@@ -961,7 +1015,7 @@ void removeMean_C(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
 
 void removeMean_SSE(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
 {
-	__asm
+	/*__asm
 	{
 		mov edx,dftc
 		mov esi,dftgc
@@ -983,6 +1037,14 @@ four_loop:
 		add eax,4
 		cmp eax,ecx
 		jl four_loop
+	}*/
+	const float gf = dftc[0] / dftgc[0];
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		dftc2[h + 0] = gf*dftgc[h + 0];
+		dftc2[h + 1] = gf*dftgc[h + 1];
+		dftc[h + 0] -= dftc2[h + 0];
+		dftc[h + 1] -= dftc2[h + 1];
 	}
 }
 
@@ -997,7 +1059,7 @@ void addMean_C(float *dftc, const int ccnt, const float *dftc2)
 
 void addMean_SSE(float *dftc, const int ccnt, const float *dftc2)
 {
-	__asm
+	/*__asm
 	{
 		mov edx,dftc
 		mov edi,dftc2
@@ -1016,6 +1078,11 @@ twelve_loop:
 		add eax,12
 		cmp eax,ecx
 		jl twelve_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		dftc[h + 0] += dftc2[h + 0];
+		dftc[h + 1] += dftc2[h + 1];
 	}
 }
 
@@ -1034,7 +1101,7 @@ void filter_0_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_0_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1061,6 +1128,13 @@ four_loop:
 		add eax,4
 		cmp eax,ecx
 		jl four_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
+		const float coeff = max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f);
+		dftc[h + 0] *= coeff;
+		dftc[h + 1] *= coeff;
 	}
 }
 
@@ -1078,7 +1152,7 @@ void filter_1_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_1_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1098,6 +1172,12 @@ four_loop:
 		add eax,4
 		cmp eax,ecx
 		jl four_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
+		if (psd < sigmas[h])
+			dftc[h + 0] = dftc[h + 1] = 0.0f;
 	}
 }
 
@@ -1114,7 +1194,7 @@ void filter_2_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_2_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1130,6 +1210,11 @@ eight_loop:
 		add eax,8
 		cmp eax,ecx
 		jl eight_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		dftc[h + 0] *= sigmas[h];
+		dftc[h + 1] *= sigmas[h];
 	}
 }
 
@@ -1155,7 +1240,7 @@ void filter_3_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_3_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1187,6 +1272,20 @@ four_loop:
 		add eax,4
 		cmp eax,ccnt
 		jl four_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
+		if (psd >= pmin[h] && psd <= pmax[h])
+		{
+			dftc[h + 0] *= sigmas[h];
+			dftc[h + 1] *= sigmas[h];
+		}
+		else
+		{
+			dftc[h + 0] *= sigmas2[h];
+			dftc[h + 1] *= sigmas2[h];
+		}
 	}
 }
 
@@ -1205,7 +1304,7 @@ void filter_4_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_4_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1239,6 +1338,13 @@ four_loop:
 		add eax,4
 		cmp eax,ecx
 		jl four_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1] + 1e-15f;
+		const float mult = sigmas[h] * sqrtf((psd*pmax[h]) / ((psd + pmin[h])*(psd + pmax[h])));
+		dftc[h + 0] *= mult;
+		dftc[h + 1] *= mult;
 	}
 }
 
@@ -1357,7 +1463,7 @@ void filter_6_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_6_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1388,6 +1494,13 @@ four_loop:
 		add eax,4
 		cmp eax,ecx
 		jl four_loop
+	}*/
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
+		const float coeff = sqrtf(max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f));
+		dftc[h + 0] *= coeff;
+		dftc[h + 1] *= coeff;
 	}
 }
 
@@ -2361,7 +2474,7 @@ void dfttest::loadFile(float *dest, const char *src, const float wscale, IScript
 int num_processors()
 {
 	int pcount = 0;
-	DWORD p_aff, s_aff;
+	DWORD_PTR p_aff, s_aff;
 	GetProcessAffinityMask(GetCurrentProcess(), &p_aff, &s_aff);
 	for(; p_aff != 0; p_aff>>=1) 
 		pcount += (p_aff&1);
