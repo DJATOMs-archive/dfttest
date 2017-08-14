@@ -1,9 +1,9 @@
 /*
-**                    dfttest v1.9.4 for Avisynth 2.5.x
+**                    dfttest v1.9.4.1 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
-**   Copyright (C) 2007-2010 Kevin Stone
+**   Copyright (C) 2007-2010 Kevin Stone, 2017 (C) DJATOM
 **
 **   This program is free software; you can redistribute it and/or modify
 **   it under the terms of the GNU General Public License as published by
@@ -22,6 +22,14 @@
 
 /*
 Modifications:
+
+2017.08.14 - DJATOM
+	Changes from 1.9.4:
+	 - x64 ready: ported almost all inline asm to intrinsics (dropped some SSE functions, we're in 2017 now). 
+	 - AddMean and RemoveMean got their AVX codepaths.
+	 - PlanarFrame updated from JPSDR's NNEDI3 repo (x64 friendly, HBD ready).
+	 - proc0_16 got SSE2 codepath (I can see noticeable speed-up against old version).
+	 - opt parameter change: 2 - SSE/SSE2, 3 - SSE/SSE2/AVX codepath is used.
 
 2009.12.25 - Firesledge
 	Added the bool "lsb" parameter. It outputs 16-bit pixel components by
@@ -52,8 +60,10 @@ Modifications:
 */
 
 #include "dfttest.h"
+#include "dfttest_avx.h"
+#include <cassert>
 
-#include	<cassert>
+#pragma warning(disable : 4305)
 
 PVideoFrame __stdcall dfttest::GetFrame(int n, IScriptEnvironment *env)
 {
@@ -95,37 +105,20 @@ void proc0_C(const unsigned char *s0, const float *s1, float *d,
 void proc0_SSE2_4(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
-	/*__asm
-	{
-		mov esi,s0
-		mov edi,s1
-		mov edx,d
-		mov eax,p1
-		pxor xmm7,xmm7
-uloop:
-		mov ecx,p1
-		xor ebx,ebx
-vloop:
-		movd xmm0,[esi+ebx]
-		punpcklbw xmm0,xmm7
-		punpcklbw xmm0,xmm7
-		cvtdq2ps xmm0,xmm0
-		mulps xmm0,[edi+ebx*4]
-		movaps [edx+ebx*4],xmm0
-		add ebx,4
-		sub ecx,4
-		jnz vloop
-		add esi,p0
-		mov ecx,p1
-		lea edi,[edi+ecx*4]
-		lea edx,[edx+ecx*4]
-		sub eax,1
-		jnz uloop
-	}*/
+	auto zero = _mm_setzero_si128();
 	for (int u = 0; u<p1; ++u)
 	{
-		for (int v = 0; v<p1; ++v)
-			d[v] = s0[v] * s1[v];
+		for (int v = 0; v < p1; v += 4)
+		{
+			/* Intel's compiller works fine with aligned versions, MS randomly crashing */
+			auto s0_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v));
+			auto s0_unp_lo1 = _mm_unpacklo_epi8(s0_load, zero);
+			auto s0_unp_lo2 = _mm_unpacklo_epi8(s0_unp_lo1, zero);
+			auto s0_loop = _mm_cvtepi32_ps(s0_unp_lo2);
+			auto s1_loop = _mm_load_ps(s1 + v);
+			auto d_reslt = _mm_mul_ps(s0_loop, s1_loop);
+			_mm_store_ps(d + v, d_reslt);
+		}
 		s0 += p0;
 		s1 += p1;
 		d += p1;
@@ -135,42 +128,24 @@ vloop:
 void proc0_SSE2_8(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
-	/*__asm
-	{
-		mov esi,s0
-		mov edi,s1
-		mov edx,d
-		mov eax,p1
-		pxor xmm7,xmm7
-uloop:
-		mov ecx,p1
-		xor ebx,ebx
-vloop:
-		movq xmm0,QWORD PTR[esi+ebx]
-		punpcklbw xmm0,xmm7
-		movdqa xmm1,xmm0
-		punpcklbw xmm0,xmm7
-		punpckhbw xmm1,xmm7
-		cvtdq2ps xmm0,xmm0
-		cvtdq2ps xmm1,xmm1
-		mulps xmm0,[edi+ebx*4]
-		mulps xmm1,[edi+ebx*4+16]
-		movaps [edx+ebx*4],xmm0
-		movaps [edx+ebx*4+16],xmm1
-		add ebx,8
-		sub ecx,8
-		jnz vloop
-		add esi,p0
-		mov ecx,p1
-		lea edi,[edi+ecx*4]
-		lea edx,[edx+ecx*4]
-		sub eax,1
-		jnz uloop
-	}*/
+	auto zero = _mm_setzero_si128();
 	for (int u = 0; u<p1; ++u)
 	{
-		for (int v = 0; v<p1; ++v)
-			d[v] = s0[v] * s1[v];
+		for (int v = 0; v < p1; v += 8)
+		{
+			auto s0_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v));
+			auto s0_u_lo1 = _mm_unpacklo_epi8(s0_load, zero);
+			auto s0_u_lo2 = _mm_unpacklo_epi8(s0_u_lo1, zero);
+			auto s0_u_hi2 = _mm_unpackhi_epi8(s0_u_lo1, zero);
+			auto s0_loop_lo = _mm_cvtepi32_ps(s0_u_lo2);
+			auto s0_loop_hi = _mm_cvtepi32_ps(s0_u_hi2);
+			auto s1_loop_lo = _mm_load_ps(s1 + v);
+			auto s1_loop_hi = _mm_load_ps(s1 + v + 4);
+			auto d_result1 = _mm_mul_ps(s0_loop_lo, s1_loop_lo);
+			auto d_result2 = _mm_mul_ps(s0_loop_hi, s1_loop_hi);
+			_mm_store_ps(d + v, d_result1);
+			_mm_store_ps(d + v + 4, d_result2);
+		}
 		s0 += p0;
 		s1 += p1;
 		d += p1;
@@ -195,6 +170,34 @@ void proc0_16_C(const unsigned char *s0, const float *s1, float *d,
 	}
 }
 
+void proc0_16_SSE2(const unsigned char *s0, const float *s1, float *d,
+	const int p0, const int p1, const int offset_lsb)
+{
+	auto zero = _mm_setzero_si128();
+	auto round = _mm_set_ps1(1.0f / 256);
+	for (int u = 0; u < p1; ++u)
+	{
+		for (int v = 0; v < p1; v += 4)
+		{
+			auto msb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v));
+			auto lsb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v + offset_lsb));
+			auto int_lo = _mm_unpacklo_epi8(lsb, msb);
+			auto int_hi = _mm_unpackhi_epi8(lsb, msb);
+			auto shift = _mm_unpacklo_epi8(_mm_slli_epi16(int_hi, 8), zero);
+			auto add = _mm_add_epi16(shift, int_lo);
+			auto s0_loop_i = _mm_unpacklo_epi16(add, zero);
+			auto s0_loop = _mm_cvtepi32_ps(s0_loop_i);
+			auto s1_loop = _mm_load_ps(s1 + v);
+			auto d_result = _mm_mul_ps(s0_loop, s1_loop);
+			d_result = _mm_mul_ps(d_result, round);
+			_mm_store_ps(d + v, d_result);
+		}
+		s0 += p0;
+		s1 += p1;
+		d += p1;
+	}
+}
+
 void proc1_C(const float *s0, const float *s1, float *d,
 	const int p0, const int p1)
 {
@@ -211,36 +214,18 @@ void proc1_C(const float *s0, const float *s1, float *d,
 void proc1_SSE_4(const float *s0, const float *s1, float *d,
 	const int p0, const int p1)
 {
-	/*__asm
-	{
-		mov esi,s0
-		mov edi,s1
-		mov edx,d
-		mov eax,p0
-uloop:
-		mov ecx,p0
-		xor ebx,ebx
-vloop:
-		movaps xmm0,[esi+ebx*4]
-		mulps xmm0,[edi+ebx*4]
-		movups xmm1,[edx+ebx*4]
-		addps xmm0,xmm1
-		movups [edx+ebx*4],xmm0
-		add ebx,4
-		sub ecx,4
-		jnz vloop
-		mov ecx,p0
-		lea esi,[esi+ecx*4]
-		lea edi,[edi+ecx*4]
-		mov ecx,p1
-		lea edx,[edx+ecx*4]
-		sub eax,1
-		jnz uloop
-	}*/
+	auto zero = _mm_setzero_si128();
 	for (int u = 0; u<p0; ++u)
 	{
-		for (int v = 0; v<p0; ++v)
-			d[v] += s0[v] * s1[v];
+		for (int v = 0; v<p0; v += 4)
+		{
+			auto s0_loop = _mm_loadu_ps(s0 + v);
+			auto s1_loop = _mm_loadu_ps(s1 + v);
+			auto d_loop = _mm_loadu_ps(d + v);
+			auto d_mul = _mm_mul_ps(s0_loop, s1_loop);
+			auto d_reslt = _mm_add_ps(d_loop, d_mul);
+			_mm_storeu_ps(d + v, d_reslt);
+		}
 		s0 += p0;
 		s1 += p0;
 		d += p1;
@@ -250,41 +235,23 @@ vloop:
 void proc1_SSE_8(const float *s0, const float *s1, float *d,
 	const int p0, const int p1)
 {
-	/*__asm
-	{
-		mov esi,s0
-		mov edi,s1
-		mov edx,d
-		mov eax,p0
-uloop:
-		mov ecx,p0
-		xor ebx,ebx
-vloop:
-		movaps xmm0,[esi+ebx*4]
-		movaps xmm1,[esi+ebx*4+16]
-		mulps xmm0,[edi+ebx*4]
-		mulps xmm1,[edi+ebx*4+16]
-		movups xmm2,[edx+ebx*4]
-		movups xmm3,[edx+ebx*4+16]
-		addps xmm0,xmm2
-		addps xmm1,xmm3
-		movups [edx+ebx*4],xmm0
-		movups [edx+ebx*4+16],xmm1
-		add ebx,8
-		sub ecx,8
-		jnz vloop
-		mov ecx,p0
-		lea esi,[esi+ecx*4]
-		lea edi,[edi+ecx*4]
-		mov ecx,p1
-		lea edx,[edx+ecx*4]
-		sub eax,1
-		jnz uloop
-	}*/
 	for (int u = 0; u<p0; ++u)
 	{
-		for (int v = 0; v<p0; ++v)
-			d[v] += s0[v] * s1[v];
+		for (int v = 0; v < p0; v += 8)
+		{
+			auto s0_loop1 = _mm_loadu_ps(s0 + v);
+			auto s0_loop2 = _mm_loadu_ps(s0 + v + 4);
+			auto s1_loop1 = _mm_loadu_ps(s1 + v);
+			auto s1_loop2 = _mm_loadu_ps(s1 + v + 4);
+			auto d_loop1 = _mm_loadu_ps(d + v);
+			auto d_loop2 = _mm_loadu_ps(d + v + 4);
+			auto d_mul1 = _mm_mul_ps(s0_loop1, s1_loop1);
+			auto d_mul2 = _mm_mul_ps(s0_loop2, s1_loop2);
+			auto d_reslt1 = _mm_add_ps(d_loop1, d_mul1);
+			auto d_reslt2 = _mm_add_ps(d_loop2, d_mul2);
+			_mm_storeu_ps(d + v, d_reslt1);
+			_mm_storeu_ps(d + v + 4, d_reslt2);
+		}
 		s0 += p0;
 		s1 += p0;
 		d += p1;
@@ -560,41 +527,27 @@ void dither_C(const float *p, unsigned char *dst, const int src_height,
 void intcast_SSE2_8(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width)
 {
-	/*_asm
-	{
-		mov edx,p
-		mov ecx,dst
-		mov ebx,src_width
-		mov esi,src_height
-yloop:
-		xor edi,edi
-xloop:
-		movups xmm0,[edx+edi*4]
-		movups xmm1,[edx+edi*4+16]
-		addps xmm0,sse_05
-		addps xmm1,sse_05
-		maxps xmm0,sse_0
-		maxps xmm1,sse_0
-		minps xmm0,sse_255
-		minps xmm1,sse_255
-		cvttps2dq xmm0,xmm0
-		cvttps2dq xmm1,xmm1
-		packssdw xmm0,xmm1
-		packuswb xmm0,xmm0
-		movq QWORD PTR[ecx+edi],xmm0
-		add edi,8
-		cmp edi,ebx
-		jl xloop
-		add ecx,dst_pitch
-		mov edi,width
-		lea edx,[edx+edi*4]
-		sub esi,1
-		jnz yloop
-	}*/
+	auto sse2_05 = _mm_set_ps1(0.5f);
+	auto sse2_255 = _mm_set_ps1(255);
+	auto sse2_0 = _mm_set_ps1(0);
 	for (int y = 0; y<src_height; ++y)
 	{
-		for (int x = 0; x<src_width; ++x)
-			dst[x] = min(max((int)(p[x] + 0.5f), 0), 255);
+		for (int x = 0; x < src_width; x += 8)
+		{
+			auto p_loop = _mm_loadu_ps(p + x);
+			auto p_loop2 = _mm_loadu_ps(p + x + 4);
+			auto add_loop = _mm_add_ps(sse2_05, p_loop);
+			auto add_loop2 = _mm_add_ps(sse2_05, p_loop2);
+			auto max_loop = _mm_max_ps(add_loop, sse2_0);
+			auto max_loop2 = _mm_max_ps(add_loop2, sse2_0);
+			auto min_loop = _mm_min_ps(max_loop, sse2_255);
+			auto min_loop2 = _mm_min_ps(max_loop2, sse2_255);
+			auto int1_loop = _mm_cvttps_epi32(min_loop);
+			auto int1_loop2 = _mm_cvttps_epi32(min_loop2);
+			auto packs_loop = _mm_packs_epi32(int1_loop, int1_loop2);
+			auto result = _mm_packus_epi16(packs_loop, packs_loop);
+			_mm_storeu_si128(reinterpret_cast<__m128i *>(dst + x), result);
+		}
 		p += width;
 		dst += dst_pitch;
 	}
@@ -870,36 +823,17 @@ void removeMean_C(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
 
 void removeMean_SSE(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
 {
-	/*__asm
-	{
-		mov edx,dftc
-		mov esi,dftgc
-		mov edi,dftc2
-		mov ecx,ccnt
-		xor eax,eax
-		movss xmm7,[edx]
-		//divss xmm7,[esi]
-		rcpss xmm6,[esi]
-		mulss xmm7,xmm6
-		shufps xmm7,xmm7,0
-four_loop:
-		movaps xmm0,[esi+eax*4]
-		mulps xmm0,xmm7
-		movaps xmm1,[edx+eax*4]
-		subps xmm1,xmm0
-		movaps [edx+eax*4],xmm1
-		movaps [edi+eax*4],xmm0
-		add eax,4
-		cmp eax,ecx
-		jl four_loop
-	}*/
 	const float gf = dftc[0] / dftgc[0];
-	for (int h = 0; h<ccnt; h += 2)
+	auto gf_asm = _mm_broadcast_ss(reinterpret_cast<const float*>(&gf));
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		dftc2[h + 0] = gf*dftgc[h + 0];
-		dftc2[h + 1] = gf*dftgc[h + 1];
-		dftc[h + 0] -= dftc2[h + 0];
-		dftc[h + 1] -= dftc2[h + 1];
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto dftgc_loop = _mm_loadu_ps(dftgc + h);
+		auto dftc2_loop = _mm_loadu_ps(dftc2 + h);
+		auto dftc2_result = _mm_mul_ps(gf_asm, dftgc_loop);
+		_mm_storeu_ps(dftc2 + h, dftc2_result);
+		auto dftc_result = _mm_sub_ps(dftc_loop, dftc2_result);
+		_mm_storeu_ps(dftc + h, dftc_result);
 	}
 }
 
@@ -914,30 +848,12 @@ void addMean_C(float *dftc, const int ccnt, const float *dftc2)
 
 void addMean_SSE(float *dftc, const int ccnt, const float *dftc2)
 {
-	/*__asm
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edx,dftc
-		mov edi,dftc2
-		mov ecx,ccnt
-		xor eax,eax
-twelve_loop:
-		movaps xmm0,[edx+eax*4]
-		movaps xmm1,[edx+eax*4+16]
-		movaps xmm2,[edx+eax*4+32]
-		addps xmm0,[edi+eax*4]
-		addps xmm1,[edi+eax*4+16]
-		addps xmm2,[edi+eax*4+32]
-		movaps [edx+eax*4],xmm0
-		movaps [edx+eax*4+16],xmm1
-		movaps [edx+eax*4+32],xmm2
-		add eax,12
-		cmp eax,ecx
-		jl twelve_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		dftc[h + 0] += dftc2[h + 0];
-		dftc[h + 1] += dftc2[h + 1];
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto dftc2_loop = _mm_load_ps(dftc2 + h);
+		auto dftc_result = _mm_add_ps(dftc2_loop, dftc_loop);
+		_mm_store_ps(dftc + h, dftc_result);
 	}
 }
 
@@ -956,40 +872,22 @@ void filter_0_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_0_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	auto zero = _mm_setzero_ps();
+	auto sse_1em15 = _mm_set_ps1(1e-15f);
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov ecx,ccnt
-		xor eax,eax
-		xorps xmm5,xmm5
-		movaps xmm7,sse_1em15
-four_loop:
-		movaps xmm1,[edi+eax*4]
-		movaps xmm2,xmm1
-		mulps xmm2,xmm2
-		movaps xmm3,xmm2
-		shufps xmm3,xmm3,177
-		addps xmm3,xmm2
-		movaps xmm2,xmm3
-		subps xmm3,[edx+eax*4]
-		addps xmm2,xmm7
-		//divps xmm3,xmm2
-		rcpps xmm2,xmm2
-		mulps xmm3,xmm2
-		maxps xmm3,xmm5
-		mulps xmm1,xmm3
-		movaps [edi+eax*4],xmm1
-		add eax,4
-		cmp eax,ecx
-		jl four_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-		const float coeff = max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f);
-		dftc[h + 0] *= coeff;
-		dftc[h + 1] *= coeff;
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
+		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
+		auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
+		auto sub1_loop = _mm_sub_ps(add1_loop, sigmas_loop);
+		auto add2_loop = _mm_add_ps(add1_loop, sse_1em15);
+		auto rcp1_loop = _mm_rcp_ps(add2_loop);
+		auto mul2_loop = _mm_mul_ps(sub1_loop, rcp1_loop);
+		auto max1_loop = _mm_max_ps(zero, mul2_loop);
+		auto mul3_loop = _mm_mul_ps(dftc_loop, max1_loop);
+		_mm_store_ps(dftc + h, mul3_loop);
 	}
 }
 
@@ -1007,32 +905,16 @@ void filter_1_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_1_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov ecx,ccnt
-		xor eax,eax
-four_loop:
-		movaps xmm1,[edi+eax*4]
-		movaps xmm2,xmm1
-		mulps xmm2,xmm2
-		movaps xmm3,xmm2
-		shufps xmm3,xmm3,177
-		addps xmm3,xmm2
-		movaps xmm4,[edx+eax*4]
-		cmpps xmm4,xmm3,2
-		andps xmm1,xmm4
-		movaps [edi+eax*4],xmm1
-		add eax,4
-		cmp eax,ecx
-		jl four_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-		if (psd < sigmas[h])
-			dftc[h + 0] = dftc[h + 1] = 0.0f;
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
+		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
+		auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
+		auto cmple1_loop = _mm_cmple_ps(sigmas_loop, add1_loop);
+		auto and1_loop = _mm_and_ps(cmple1_loop, dftc_loop);
+		_mm_store_ps(dftc + h, and1_loop);
 	}
 }
 
@@ -1049,27 +931,12 @@ void filter_2_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_2_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov ecx,ccnt
-		xor eax,eax
-eight_loop:
-		movaps xmm0,[edi+eax*4]
-		movaps xmm1,[edi+eax*4+16]
-		mulps xmm0,[edx+eax*4]
-		mulps xmm1,[edx+eax*4+16]
-		movaps [edi+eax*4],xmm0
-		movaps [edi+eax*4+16],xmm1
-		add eax,8
-		cmp eax,ecx
-		jl eight_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		dftc[h + 0] *= sigmas[h];
-		dftc[h + 1] *= sigmas[h];
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto mul_loop = _mm_mul_ps(dftc_loop, sigmas_loop);
+		_mm_store_ps(dftc + h, mul_loop);
 	}
 }
 
@@ -1095,52 +962,26 @@ void filter_3_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_3_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	auto sse_ones = _mm_set_ps1(0xFFFFFFFFFFFFFFFF);
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov ecx,sigmas2
-		mov ebx,pmin
-		mov esi,pmax
-		xor eax,eax
-		movaps xmm7,sse_ones
-four_loop:
-		movaps xmm0,[edi+eax*4]
-		movaps xmm2,xmm0
-		mulps xmm2,xmm2
-		movaps xmm3,xmm2
-		shufps xmm3,xmm3,177
-		addps xmm3,xmm2
-		movaps xmm1,[esi+eax*4]
-		movaps xmm2,[ebx+eax*4]
-		cmpps xmm1,xmm3,5
-		cmpps xmm2,xmm3,2
-		andps xmm1,xmm2
-		movaps xmm2,[edx+eax*4]
-		movaps xmm4,[ecx+eax*4]
-		andps xmm2,xmm1
-		xorps xmm1,xmm7
-		andps xmm4,xmm1
-		orps xmm2,xmm4
-		mulps xmm0,xmm2
-		movaps [edi+eax*4],xmm0
-		add eax,4
-		cmp eax,ccnt
-		jl four_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-		if (psd >= pmin[h] && psd <= pmax[h])
-		{
-			dftc[h + 0] *= sigmas[h];
-			dftc[h + 1] *= sigmas[h];
-		}
-		else
-		{
-			dftc[h + 0] *= sigmas2[h];
-			dftc[h + 1] *= sigmas2[h];
-		}
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto sigmas2_loop = _mm_load_ps(sigmas2 + h);
+		auto pmin_loop = _mm_load_ps(pmin + h);
+		auto pmax_loop = _mm_load_ps(pmax + h);
+		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
+		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
+		auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
+		auto cmpnle1_loop = _mm_cmpnle_ps(pmax_loop, add1_loop);
+		auto cmple1_loop = _mm_cmple_ps(pmin_loop, add1_loop);
+		auto and1_loop = _mm_and_ps(cmple1_loop, cmpnle1_loop);
+		auto and2_loop = _mm_and_ps(sigmas_loop, and1_loop);
+		auto xor1_loop = _mm_xor_ps(sse_ones, and1_loop);
+		auto and3_loop = _mm_and_ps(xor1_loop, sigmas2_loop);
+		auto  or1_loop = _mm_or_ps(and3_loop, and2_loop);
+		auto mul2_loop = _mm_mul_ps(or1_loop, dftc_loop);
+		_mm_store_ps(dftc + h, mul2_loop);
 	}
 }
 
@@ -1159,47 +1000,27 @@ void filter_4_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_4_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	auto sse_1em15 = _mm_set_ps1(1e-15f);
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov ecx,ccnt
-		mov ebx,pmin
-		mov esi,pmax
-		xor eax,eax
-		movaps xmm7,sse_1em15
-four_loop:
-		movaps xmm0,[edi+eax*4]
-		movaps xmm2,xmm0
-		mulps xmm2,xmm2
-		movaps xmm3,xmm2
-		shufps xmm3,xmm3,177
-		addps xmm2,xmm7
-		addps xmm3,xmm2
-		movaps xmm1,[esi+eax*4]
-		movaps xmm2,[ebx+eax*4]
-		movaps xmm4,xmm1
-		addps xmm2,xmm3
-		addps xmm1,xmm3
-		mulps xmm4,xmm3
-		mulps xmm2,xmm1
-		//divps xmm4,xmm2
-		rcpps xmm2,xmm2
-		mulps xmm4,xmm2
-		sqrtps xmm4,xmm4
-		mulps xmm4,[edx+eax*4]
-		mulps xmm0,xmm4
-		movaps [edi+eax*4],xmm0
-		add eax,4
-		cmp eax,ecx
-		jl four_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1] + 1e-15f;
-		const float mult = sigmas[h] * sqrtf((psd*pmax[h]) / ((psd + pmin[h])*(psd + pmax[h])));
-		dftc[h + 0] *= mult;
-		dftc[h + 1] *= mult;
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto pmin_loop = _mm_load_ps(pmin + h);
+		auto pmax_loop = _mm_load_ps(pmax + h);
+		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
+		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
+		auto add1_loop = _mm_add_ps(sse_1em15, mul1_loop);
+		auto add2_loop = _mm_add_ps(add1_loop, shuff_loop);
+		auto add3_loop = _mm_add_ps(add2_loop, pmin_loop);
+		auto add4_loop = _mm_add_ps(add2_loop, pmax_loop);
+		auto mul2_loop = _mm_mul_ps(add2_loop, pmax_loop);
+		auto mul3_loop = _mm_mul_ps(add4_loop, add3_loop);
+		auto rcp1_loop = _mm_rcp_ps(mul3_loop);
+		auto mul4_loop = _mm_mul_ps(rcp1_loop, mul2_loop);
+		auto sqrt_loop = _mm_sqrt_ps(mul4_loop);
+		auto mul5_loop = _mm_mul_ps(sigmas_loop, sqrt_loop);
+		auto mul6_loop = _mm_mul_ps(mul5_loop, dftc_loop);
+		_mm_store_ps(dftc + h, mul6_loop);
 	}
 }
 
@@ -1216,90 +1037,27 @@ void filter_5_C(float *dftc, const float *sigmas, const int ccnt,
 	}
 }
 
-void filter_5_SSE(float *dftc, const float *sigmas, const int ccnt,
-	const float *pmin, const float *pmax, const float *sigmas2)
-{
-	/*__asm
-	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov esi,ccnt
-		mov ebx,pmin
-		xor eax,eax
-four_loop:
-		movss xmm1,[ebx]
-		movaps xmm2,[edi+eax*4]
-		mulps xmm2,xmm2
-		movaps xmm0,xmm2
-		shufps xmm1,xmm1,0
-		shufps xmm0,xmm0,177
-		addps xmm0,xmm2
-		movaps xmm2,xmm0
-		subps xmm0,[edx+eax*4]
-		addps xmm2,sse_1em15
-		xorps xmm5,xmm5
-		//divps xmm3,xmm2
-		rcpps xmm2,xmm2
-		mulps xmm0,xmm2
-		maxps xmm0,xmm5
-		call pow_sse
-		mulps xmm0,[edi+eax*4]
-		movaps [edi+eax*4],xmm0
-		add eax,4
-		cmp eax,esi
-		jl four_loop
-		emms
-	}*/
-	const float beta = pmin[0];
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-		const float coeff = powf(max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f), beta);
-		dftc[h + 0] *= coeff;
-		dftc[h + 1] *= coeff;
-	}
-}
-
 void filter_5_SSE2(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	auto zero = _mm_setzero_ps();
+	auto sse_1em15 = _mm_set_ps1(1e-15f);
+	auto pmin_zero = _mm_set_ps1(pmin[0]);
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov esi,ccnt
-		mov ebx,pmin
-		xor eax,eax
-four_loop:
-		movss xmm1,[ebx]
-		movaps xmm2,[edi+eax*4]
-		mulps xmm2,xmm2
-		movaps xmm0,xmm2
-		shufps xmm1,xmm1,0
-		shufps xmm0,xmm0,177
-		addps xmm0,xmm2
-		movaps xmm2,xmm0
-		subps xmm0,[edx+eax*4]
-		addps xmm2,sse_1em15
-		xorps xmm5,xmm5
-		//divps xmm3,xmm2
-		rcpps xmm2,xmm2
-		mulps xmm0,xmm2
-		maxps xmm0,xmm5
-		call pow_sse2
-		mulps xmm0,[edi+eax*4]
-		movaps [edi+eax*4],xmm0
-		add eax,4
-		cmp eax,esi
-		jl four_loop
-	}*/
-	const float beta = pmin[0];
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-		const float coeff = powf(max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f), beta);
-		dftc[h + 0] *= coeff;
-		dftc[h + 1] *= coeff;
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
+		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
+		auto add1_loop = _mm_add_ps(shuff_loop, mul1_loop);
+		auto sub1_loop = _mm_sub_ps(add1_loop, sigmas_loop);
+		auto add2_loop = _mm_add_ps(sse_1em15, add1_loop);
+		auto rcp1_loop = _mm_rcp_ps(add2_loop);
+		auto mul3_loop = _mm_mul_ps(rcp1_loop, sub1_loop);
+		auto max1_loop = _mm_max_ps(zero, mul3_loop);
+		auto pow1_loop = fmath::pow_ps(max1_loop, pmin_zero); // DJATOM: fmath is the most accurate in comparison to powf() (from what I tested)
+		auto mul4_loop = _mm_mul_ps(dftc_loop, pow1_loop);
+		_mm_store_ps(dftc + h, mul4_loop);
 	}
 }
 
@@ -1318,44 +1076,23 @@ void filter_6_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_6_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	/*__asm
+	auto sse_1em15 = _mm_set_ps1(1e-15f);
+	for (int h = 0; h<ccnt; h += 4)
 	{
-		mov edi,dftc
-		mov edx,sigmas
-		mov ecx,ccnt
-		xor eax,eax
-		//xorps xmm5,xmm5
-		movaps xmm7,sse_1em15
-four_loop:
-		movaps xmm1,[edi+eax*4]
-		movaps xmm2,xmm1
-		mulps xmm2,xmm2
-		movaps xmm3,xmm2
-		shufps xmm3,xmm3,177
-		addps xmm3,xmm2
-		movaps xmm2,xmm3
-		subps xmm3,[edx+eax*4]
-		addps xmm2,xmm7
-		//divps xmm3,xmm2
-		rcpps xmm2,xmm2
-		mulps xmm3,xmm2
-		//maxps xmm3,xmm5
-		//sqrtps xmm3,xmm3
-		maxps xmm3,xmm7
-		rsqrtps xmm3,xmm3
-		rcpps xmm3,xmm3
-		mulps xmm1,xmm3
-		movaps [edi+eax*4],xmm1
-		add eax,4
-		cmp eax,ecx
-		jl four_loop
-	}*/
-	for (int h = 0; h<ccnt; h += 2)
-	{
-		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-		const float coeff = sqrtf(max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f));
-		dftc[h + 0] *= coeff;
-		dftc[h + 1] *= coeff;
+		auto dftc_loop = _mm_load_ps(dftc + h);
+		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
+		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
+		auto add1_loop = _mm_add_ps(shuff_loop, mul1_loop);
+		auto sub1_loop = _mm_sub_ps(add1_loop, sigmas_loop);
+		auto add2_loop = _mm_add_ps(sse_1em15, add1_loop);
+		auto rcp1_loop = _mm_rcp_ps(add2_loop);
+		auto mul2_loop = _mm_mul_ps(rcp1_loop, sub1_loop);
+		auto max1_loop = _mm_max_ps(sse_1em15, mul2_loop);
+		auto rsq1_loop = _mm_rsqrt_ps(max1_loop);
+		auto rcp2_loop = _mm_rcp_ps(rsq1_loop);
+		auto mul3_loop = _mm_mul_ps(dftc_loop, rcp2_loop);
+		_mm_store_ps(dftc + h, mul3_loop);
 	}
 }
 
@@ -1829,7 +1566,40 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 				pssInfo[i]->ofs_lsb[b] = 0;
 			}
 		}
-		if (((env->GetCPUFlags()&CPUF_SSE2) && opt == 0) || opt == 3)
+		if (((env->GetCPUFlags()&CPUF_AVX) && opt == 0) || opt == 3)
+		{
+			if (!(sbsize & 7))
+			{
+				pssInfo[i]->proc0 = proc0_SSE2_8;
+				pssInfo[i]->proc1 = proc1_SSE_8;
+			}
+			else if (!(sbsize & 3))
+			{
+				pssInfo[i]->proc0 = proc0_SSE2_4;
+				pssInfo[i]->proc1 = proc1_SSE_4;
+			}
+			else
+			{
+				pssInfo[i]->proc0 = proc0_C;
+				pssInfo[i]->proc1 = proc1_C;
+			}
+			pssInfo[i]->removeMean = removeMean_AVX;
+			pssInfo[i]->addMean = addMean_AVX;
+			if (ftype == 0)
+			{
+				if (fabsf(_f0beta - 1.0f) < 0.00005f)
+					pssInfo[i]->filterCoeffs = filter_0_SSE;
+				else if (fabsf(_f0beta - 0.5f) < 0.00005f)
+					pssInfo[i]->filterCoeffs = filter_6_SSE;
+				else
+					pssInfo[i]->filterCoeffs = filter_5_SSE2;
+			}
+			else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_SSE;
+			else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_SSE;
+			else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_SSE;
+			else pssInfo[i]->filterCoeffs = filter_4_SSE;
+		}
+		else if (((env->GetCPUFlags()&CPUF_SSE2) && opt == 0) || opt == 2)
 		{
 			if (!(sbsize&7))
 			{
@@ -1862,39 +1632,6 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 			else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_SSE;
 			else pssInfo[i]->filterCoeffs = filter_4_SSE;
 		}
-		else if (((env->GetCPUFlags()&CPUF_SSE) && opt == 0) || opt == 2)
-		{
-			if (!(sbsize&7))
-			{
-				pssInfo[i]->proc0 = proc0_SSE2_8;
-				pssInfo[i]->proc1 = proc1_SSE_8;
-			}
-			else if (!(sbsize&3))
-			{
-				pssInfo[i]->proc0 = proc0_SSE2_4;
-				pssInfo[i]->proc1 = proc1_SSE_4;
-			}
-			else
-			{
-				pssInfo[i]->proc0 = proc0_C;
-				pssInfo[i]->proc1 = proc1_C;
-			}
-			pssInfo[i]->removeMean = removeMean_SSE;
-			pssInfo[i]->addMean = addMean_SSE;
-			if (ftype == 0)
-			{
-				if (fabsf(_f0beta-1.0f) < 0.00005f) 
-					pssInfo[i]->filterCoeffs = filter_0_SSE;
-				else if (fabsf(_f0beta-0.5f) < 0.00005f)
-					pssInfo[i]->filterCoeffs = filter_6_SSE;
-				else
-					pssInfo[i]->filterCoeffs = filter_5_SSE;
-			}
-			else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_SSE;
-			else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_SSE;
-			else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_SSE;
-			else pssInfo[i]->filterCoeffs = filter_4_SSE;
-		}
 		else
 		{
 			pssInfo[i]->proc0 = proc0_C;
@@ -1917,7 +1654,14 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 		}
 		if (lsb_in_flag)
 		{
-			pssInfo[i]->proc0 = proc0_16_C;
+			if (((env->GetCPUFlags()&CPUF_SSE2) && opt == 0) || opt >= 2)
+			{
+				pssInfo[i]->proc0 = proc0_16_SSE2;
+			}
+			else
+			{
+				pssInfo[i]->proc0 = proc0_16_C;
+			}
 		}
 		pssInfo[i]->jobFinished = CreateEvent(NULL, TRUE, TRUE, NULL);
 		pssInfo[i]->nextJob = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -2523,5 +2267,5 @@ extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScri
 		"[twin]i[sbeta]f[tbeta]f[zmean]b[sfile]s[sfile2]s[pminfile]s[pmaxfile]s" \
 		"[f0beta]f[nfile]s[threads]i[opt]i[nstring]s[sstring]s[ssx]s[ssy]s[sst]s" \
 		"[dither]i[lsb]b[lsb_in]b[quiet]b", Create_dfttest, 0);
-	return 0;
+	return "DFTTest for Avisynth+";
 }

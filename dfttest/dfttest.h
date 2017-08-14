@@ -1,9 +1,9 @@
 /*
-**                    dfttest v1.9.3 for Avisynth 2.5.x
+**                    dfttest v1.9.4.1 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
-**   Copyright (C) 2007-2010 Kevin Stone
+**   Copyright (C) 2007-2010 Kevin Stone, 2017 (C) DJATOM
 **
 **   This program is free software; you can redistribute it and/or modify
 **   it under the terms of the GNU General Public License as published by
@@ -33,6 +33,8 @@
 #include "avisynth.h"
 #include "PlanarFrame.h"
 #include "MersenneTwister.h"
+#include <emmintrin.h>
+#include "fmath.h"
 
 typedef float fftwf_complex[2];
 typedef struct fftwf_plan_s *fftwf_plan;
@@ -94,6 +96,8 @@ void proc0_SSE2_8(const unsigned char *s0, const float *s1, float *d,
 
 void proc0_16_C(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int offset_lsb);
+void proc0_16_SSE2(const unsigned char *s0, const float *s1, float *d,
+	const int p0, const int p1, const int offset_lsb);
 
 void proc1_C(const float *s0, const float *s1, float *d,
 	const int p0, const int p1);
@@ -110,12 +114,6 @@ void dither_C(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width, const int mode);
 void intcast_SSE2_8(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width);
-
-__declspec(align(16)) const float sse_1em15[4] = { 1e-15f, 1e-15f, 1e-15f, 1e-15f };
-__declspec(align(16)) const __int64 sse_ones[2] = { 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF };
-__declspec(align(16)) const float sse_05[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
-__declspec(align(16)) const float sse_0[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-__declspec(align(16)) const float sse_255[4] = { 255.0f, 255.0f, 255.0f, 255.0f };
 
 double getWinValue(double n, double size, int win, double beta);
 void createWindow(float *hw, const int tmode, const int tbsize, 
@@ -241,4 +239,14 @@ public:
 		bool _lsb_in_flag, bool _lsb_out_flag, bool _quiet_flag,
 		IScriptEnvironment *env);
 	dfttest::~dfttest();
+	int __stdcall dfttest::SetCacheHints(int cachehints, int frame_range)
+	{
+		switch (cachehints)
+		{
+		case CACHE_GET_MTMODE:
+			return MT_MULTI_INSTANCE;
+		default:
+			return 0;
+		}
+	}
 };

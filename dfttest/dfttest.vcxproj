@@ -169,11 +169,16 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="dfttest.cpp" />
+    <ClCompile Include="dfttest_avx.cpp">
+      <EnableEnhancedInstructionSet Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AdvancedVectorExtensions</EnableEnhancedInstructionSet>
+    </ClCompile>
     <ClCompile Include="PlanarFrame.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="avisynth.h" />
     <ClInclude Include="dfttest.h" />
+    <ClInclude Include="dfttest_avx.h" />
+    <ClInclude Include="fmath.h" />
     <ClInclude Include="internal.h" />
     <ClInclude Include="memcpy_amd.h" />
     <ClInclude Include="MersenneTwister.h" />
