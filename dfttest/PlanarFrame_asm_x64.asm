@@ -1,0 +1,232 @@
+.data
+
+align 16
+
+Ymask qword 2 dup(00FF00FF00FF00FFh)
+
+.code
+
+
+;convYUY2to422_SSE2 proc src:dword,py:dword,pu:dword,pv:dword,pitch1:dword,pitch2Y:dword,pitch2UV:dword,width_:dword,height:dword
+; src = rcx
+; py = rdx
+; pu = r8
+; pv = r9
+
+convYUY2to422_SSE2 proc public frame
+	
+pitch1 equ dword ptr[rbp+48]
+pitch2Y equ dword ptr[rbp+56]
+pitch2UV equ dword ptr[rbp+64]
+width_ equ dword ptr[rbp+72]
+height equ dword ptr[rbp+80]
+
+	push rbp
+	.pushreg rbp
+	mov rbp,rsp
+	push rbx
+	.pushreg rbx
+	push rsi
+	.pushreg rsi
+	push rdi
+	.pushreg rdi
+	push r12
+	.pushreg r12
+	push r13
+	.pushreg r13
+	push r14
+	.pushreg r14
+	push r15
+	.pushreg r15
+	.endprolog
+		
+		mov rdi,rcx
+		mov rbx,rdx
+		mov rdx,r8
+		mov rsi,r9
+		xor rcx,rcx
+		mov r13d,width_
+		
+		xor r8,r8
+		mov r8d,height
+		movsxd r9,pitch1
+		movsxd r10,pitch2Y
+		movsxd r11,pitch2UV
+		mov r12,8
+		mov r14d,r13d
+		shr r14d,1
+		mov r15d,1		
+		
+yloop_2:
+		xor rax,rax
+		mov ecx,r14d
+		or ecx,ecx
+		jz short suite1_2
+		
+xloop_2:
+	movdqa xmm0,XMMWORD ptr[rdi+4*rax]   ;V4Y8U4Y7V3Y6U3Y5 V2Y4U2Y3V1Y2U1Y1
+	movdqa xmm1,XMMWORD ptr[rdi+4*rax+16]   ;V8Y16U8Y15V7Y14U7Y13 V6Y12U6Y11V5Y10U5Y9
+	movdqa xmm2,xmm0                      ;V4Y8U4Y7V3Y6U3Y5 V2Y4U2Y3V1Y2U1Y1
+	punpcklbw xmm0,xmm1                  ;V6V2Y12Y4U6U2Y11Y3 V5V1Y10Y2U5U1Y9Y1
+	punpckhbw xmm2,xmm1                  ;V8V4Y16Y8U8U4Y15Y7 V7V3Y14Y6U7U3Y13Y5
+	movdqa xmm1,xmm0
+	punpcklbw xmm0,xmm2                  ;V7V5V3V1Y14Y10Y6Y2 U7U5U3U1Y13Y9Y5Y1
+	punpckhbw xmm1,xmm2                  ;V8V6V4V2Y16Y12Y8Y4 U8U6U4U2Y15Y11Y7Y3
+	movdqa xmm2,xmm0
+	punpcklbw xmm0,xmm1                  ;U8U7U6U5U4U3U2U1 Y15Y13Y11Y9Y5Y3Y1
+	punpckhbw xmm2,xmm1                  ;V8V7V6V5V4V3V2V1 Y16Y14Y12Y10Y8Y6Y4Y2
+	movhps qword ptr [rdx+rax],xmm0
+	punpcklbw xmm0,xmm2                  ;Y16Y15Y14Y13Y12Y11Y10Y9Y8Y7Y6Y5Y4Y3Y2Y1
+	movhps qword ptr [rsi+rax],xmm2
+	movdqa XMMWORD ptr[rbx+2*rax],xmm0
+	add rax,r12
+	loop xloop_2
+
+suite1_2:
+		mov ecx,r13d
+		and ecx,r15d
+		jz short suite2_2
+
+	movdqa xmm0,XMMWORD ptr[rsi+4*rax]   ;V4Y8U4Y7V3Y6U3Y5 V2Y4U2Y3V1Y2U1Y1
+	movhlps xmm1,xmm0                    ;V4Y8U4Y7V3Y6U3Y5 V4Y8U4Y7V3Y6U3Y5
+	punpcklbw xmm0,xmm1                  ;V4V2Y8Y4U4U2Y7Y3 V3V1Y6Y2U3U1Y5Y1
+	movhlps xmm1,xmm0                    ;V4V2Y8Y4U4U2Y7Y3 V4V2Y8Y4U4U2Y7Y3
+	punpcklbw xmm0,xmm1                  ;V4V3V2V1Y8Y6Y4Y2 U4U3U2U1Y7Y5Y3Y1
+	movhlps xmm2,xmm0                    ;xxxxxxxx V4V3V2V1Y8Y6Y4Y2
+	movdqa xmm1,xmm0
+	psrlq xmm0,32                        ;0000V4V3V2V1 0000U4U3U2U1
+	punpcklbw xmm1,xmm2                  ; xxxxxxxx Y8Y7Y6Y5Y4Y3Y2Y1
+	movd dword ptr[rdx+rax],xmm0
+	movhlps xmm2,xmm0
+	movq qword ptr[rbx+2*rax],xmm1
+	movd dword ptr[rsi+rax],xmm2	
+	
+suite2_2:	
+		add rdi,r9
+		add rbx,r10
+		add rdx,r11
+		add rsi,r11
+		dec r8
+		jnz yloop_2
+		
+	pop r15
+	pop r14
+	pop r13
+	pop r12
+	pop rdi
+	pop rsi
+	pop rbx
+	pop rbp		
+				
+		ret
+		
+convYUY2to422_SSE2 endp
+
+
+;conv422toYUY2_SSE2 proc py:dword,pu:dword,pv:dword,dst:dword,pitch1Y:dword,pitch1UV:dword,pitch2:dword,width_:dword,height:dword
+; py = rcx
+; pu = rdx
+; pv = r8
+; dst = r9
+
+conv422toYUY2_SSE2 proc public frame
+	
+pitch1Y equ dword ptr[rbp+48]
+pitch1UV equ dword ptr[rbp+56]
+pitch2 equ dword ptr[rbp+64]
+width_ equ dword ptr[rbp+72]
+height equ dword ptr[rbp+80]
+
+	push rbp
+	.pushreg rbp
+	mov rbp,rsp
+	push rbx
+	.pushreg rbx
+	push rsi
+	.pushreg rsi
+	push rdi
+	.pushreg rdi
+	push r12
+	.pushreg r12
+	push r13
+	.pushreg r13
+	push r14
+	.pushreg r14
+	push r15
+	.pushreg r15
+	.endprolog
+			
+		mov rbx,rcx
+		mov rsi,r8
+		mov rdi,r9
+		xor rcx,rcx
+		mov r15d,width_
+		shr ecx,1
+		
+		xor r8,r8
+		mov r8d,height
+		movsxd r9,pitch1Y
+		movsxd r10,pitch1UV
+		movsxd r11,pitch2
+		mov r12,16
+		mov r13,32
+		mov r14,2
+		
+yloop_4:
+		xor rax,rax
+		mov ecx,r15d
+		shr ecx,1
+		jz short suite1
+		
+xloop_4:
+		movq xmm1,qword ptr[rdx+4*rax]     ;00000000UUUUUUUU
+		movq xmm0,qword ptr[rsi+4*rax]     ;00000000VVVVVVVV
+		movdqa xmm2,XMMWORD ptr[rbx+8*rax] ;YYYYYYYYYYYYYYYY
+		punpcklbw xmm1,xmm0					;VUVUVUVUVUVUVUVU
+		movdqa xmm3,xmm2
+		add rax,r14
+		punpcklbw xmm2,xmm1     			;VYUYVYUYVYUYVYUY
+		punpckhbw xmm3,xmm1     			;VYUYVYUYVYUYVYUY
+		
+		movdqa XMMWORD ptr[rdi],xmm2 ;store
+		movdqa XMMWORD ptr[rdi+r12],xmm3 ;store
+		add rdi,r13
+		loop xloop_4
+		
+suite1:		
+		mov ecx,r15d
+		and ecx,1
+		jz short suite2
+
+		movd xmm1,dword ptr[rdx+4*rax]     ;000000000000UUUU
+		movd xmm0,dword ptr[rsi+4*rax]     ;000000000000VVVV
+		movq xmm2,qword ptr[rbx+8*rax] ;00000000YYYYYYY
+		punpcklbw xmm1,xmm0					;00000000VUVUVUVU
+		punpcklbw xmm2,xmm1     			;VYUYVYUYVYUYVYUY
+		
+		movdqa XMMWORD ptr[rdi],xmm2 ;store
+		add rdi,r12			
+		
+suite2:		
+		add rbx,r9
+		add rdx,r10
+		add rsi,r10
+		add rdi,r11
+		dec r8
+		jnz short yloop_4
+		
+	pop r15
+	pop r14
+	pop r13
+	pop r12
+	pop rdi
+	pop rsi
+	pop rbx
+	pop rbp		
+				
+		ret
+		
+conv422toYUY2_SSE2 endp
+
+
+end

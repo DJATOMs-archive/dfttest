@@ -1,6 +1,3 @@
-// Avisynth v2.5.  Copyright 2002 Ben Rudiak-Gould et al.
-// http://www.avisynth.org
-
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation; either version 2 of the License, or
@@ -32,24 +29,26 @@
 // which is not derived from or based on Avisynth, such as 3rd-party filters,
 // import and export plugins, or graphical user interfaces.
 
+#ifndef AVSCORE_WIN_H
+#define AVSCORE_WIN_H
 
-#ifndef __Internal_H__
-#define __Internal_H__
+// Whenever you need windows headers, start by including this file, then the rest.
 
-#include "avisynth.h"
+// WWUUT? We require XP now?
+#if !defined(NTDDI_VERSION) && !defined(_WIN32_WINNT)
+  #define NTDDI_VERSION 0x05020000
+  #define _WIN32_WINNT  0x0502
+#endif
 
-class _PixelClip {
-	enum { buffer = 320 };
-	BYTE clip[256 + buffer * 2];
-public:
-	_PixelClip() {
-		memset(clip, 0, buffer);
-		for (int i = 0; i<256; ++i) clip[i + buffer] = i;
-		memset(clip + buffer + 256, 255, buffer);
-	}
-	BYTE operator()(int i) { return clip[i + buffer]; }
-};
+#define WIN32_LEAN_AND_MEAN
+#define STRICT
+#if !defined(NOMINMAX)
+    #define NOMINMAX
+#endif
 
-extern _PixelClip PixelClip;
+#include <windows.h>
 
-#endif  // __Internal_H__
+// Provision for UTF-8 max 4 bytes per code point
+#define AVS_MAX_PATH MAX_PATH*4
+
+#endif // AVSCORE_WIN_H

@@ -1258,7 +1258,7 @@ void filter_5_C(float *dftc, const float *sigmas, const int ccnt,
 void filter_5_SSE(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1288,13 +1288,21 @@ four_loop:
 		cmp eax,esi
 		jl four_loop
 		emms
+	}*/
+	const float beta = pmin[0];
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
+		const float coeff = powf(max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f), beta);
+		dftc[h + 0] *= coeff;
+		dftc[h + 1] *= coeff;
 	}
 }
 
 void filter_5_SSE2(float *dftc, const float *sigmas, const int ccnt,
 	const float *pmin, const float *pmax, const float *sigmas2)
 {
-	__asm
+	/*__asm
 	{
 		mov edi,dftc
 		mov edx,sigmas
@@ -1323,6 +1331,14 @@ four_loop:
 		add eax,4
 		cmp eax,esi
 		jl four_loop
+	}*/
+	const float beta = pmin[0];
+	for (int h = 0; h<ccnt; h += 2)
+	{
+		const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
+		const float coeff = powf(max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f), beta);
+		dftc[h + 0] *= coeff;
+		dftc[h + 1] *= coeff;
 	}
 }
 
@@ -1666,7 +1682,7 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 		noyc = (proc_height>> ssyuv) + EXTRA (proc_height>> ssyuv, sbsize) + ae;
 	}
 	PlanarFrame *padPF = new PlanarFrame();
-	padPF->createPlanar(noyl*lsb_in_hmul,noyc*lsb_in_hmul,noxl,noxc);
+	padPF->createPlanar(noyl*lsb_in_hmul,noyc*lsb_in_hmul,noxl,noxc,false,false,1,8); // DJATOM: line updated with hardcoded defaults. Now it works with 8-bit frame using updated PlanarFrame
 	if (tbsize > 1)
 		fc = new nlCache(tbsize,padPF,(VideoInfo)vi_src);
 	else
@@ -2528,8 +2544,12 @@ AVSValue __cdecl Create_dfttest(AVSValue args, void* user_data, IScriptEnvironme
 		env);
 }
 
-extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit2(IScriptEnvironment* env) 
+const AVS_Linkage *AVS_linkage = nullptr;
+
+extern "C" __declspec(dllexport) const char* __stdcall AvisynthPluginInit3(IScriptEnvironment* env, const AVS_Linkage* const vectors)
 {
+	AVS_linkage = vectors;
+
 	env->AddFunction("dfttest", "c[Y]b[U]b[V]b[ftype]i[sigma]f[sigma2]f[pmin]f" \
 		"[pmax]f[sbsize]i[smode]i[sosize]i[tbsize]i[tmode]i[tosize]i[swin]i" \
 		"[twin]i[sbeta]f[tbeta]f[zmean]b[sfile]s[sfile2]s[pminfile]s[pmaxfile]s" \

@@ -1,6 +1,3 @@
-// Avisynth v2.5.  Copyright 2002 Ben Rudiak-Gould et al.
-// http://www.avisynth.org
-
 // This program is free software; you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
 // the Free Software Foundation; either version 2 of the License, or
@@ -32,24 +29,26 @@
 // which is not derived from or based on Avisynth, such as 3rd-party filters,
 // import and export plugins, or graphical user interfaces.
 
+#ifndef AVSCORE_MINMAX_H
+#define AVSCORE_MINMAX_H
 
-#ifndef __Internal_H__
-#define __Internal_H__
+template<typename T>
+T min(T v1, T v2)
+{
+  return v1 < v2 ? v1 : v2;
+}
 
-#include "avisynth.h"
+template<typename T>
+T max(T v1, T v2)
+{
+  return v1 > v2 ? v1 : v2;
+}
 
-class _PixelClip {
-	enum { buffer = 320 };
-	BYTE clip[256 + buffer * 2];
-public:
-	_PixelClip() {
-		memset(clip, 0, buffer);
-		for (int i = 0; i<256; ++i) clip[i + buffer] = i;
-		memset(clip + buffer + 256, 255, buffer);
-	}
-	BYTE operator()(int i) { return clip[i + buffer]; }
-};
+template<typename T>
+T clamp(T n, T min, T max)
+{
+    n = n > max ? max : n;
+    return n < min ? min : n;
+}
 
-extern _PixelClip PixelClip;
-
-#endif  // __Internal_H__
+#endif // AVSCORE_MINMAX_H

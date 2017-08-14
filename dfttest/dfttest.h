@@ -30,7 +30,6 @@
 #include <float.h>
 #include <process.h>
 #include <time.h>
-#include "ssemath.h"
 #include "avisynth.h"
 #include "PlanarFrame.h"
 #include "MersenneTwister.h"
