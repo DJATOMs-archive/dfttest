@@ -87,11 +87,7 @@ void filter_4_SSE(float *dftc, const float *sigmas, const int ccnt,
 
 void proc0_C(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int offset_lsb);
-void proc0_SSE_4(const unsigned char *s0, const float *s1, float *d,
-	const int p0, const int p1, const int offset_lsb);
 void proc0_SSE2_4(const unsigned char *s0, const float *s1, float *d,
-	const int p0, const int p1, const int offset_lsb);
-void proc0_SSE_8(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int offset_lsb);
 void proc0_SSE2_8(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int offset_lsb);
@@ -112,8 +108,6 @@ void intcast_C_16_bits(const float *p, unsigned char *dst, unsigned char *dst_ls
 	const int src_width, const int dst_pitch, const int width);
 void dither_C(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width, const int mode);
-void intcast_SSE_1(const float *p, unsigned char *dst, const int src_height,
-	const int src_width, const int dst_pitch, const int width);
 void intcast_SSE2_8(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width);
 

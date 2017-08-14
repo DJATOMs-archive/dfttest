@@ -92,51 +92,6 @@ void proc0_C(const unsigned char *s0, const float *s1, float *d,
 	}
 }
 
-void proc0_SSE_4(const unsigned char *s0, const float *s1, float *d,
-	const int p0, const int p1, const int /*offset_lsb*/)
-{
-	/*__asm
-	{
-		mov esi,s0
-		mov edi,s1
-		mov edx,d
-		mov eax,p1
-		pxor mm7,mm7
-uloop:
-		mov ecx,p1
-		xor ebx,ebx
-vloop:
-		movd mm0,[esi+ebx]
-		punpcklbw mm0,mm7
-		movq mm1,mm0
-		punpcklbw mm0,mm7
-		punpckhbw mm1,mm7
-		cvtpi2ps xmm0,mm0
-		cvtpi2ps xmm1,mm1
-		shufps xmm0,xmm1,68
-		mulps xmm0,[edi+ebx*4]
-		movaps [edx+ebx*4],xmm0
-		add ebx,4
-		sub ecx,4
-		jnz vloop
-		add esi,p0
-		mov ecx,p1
-		lea edi,[edi+ecx*4]
-		lea edx,[edx+ecx*4]
-		sub eax,1
-		jnz uloop
-		emms
-	}*/
-	for (int u = 0; u<p1; ++u)
-	{
-		for (int v = 0; v<p1; ++v)
-			d[v] = s0[v] * s1[v];
-		s0 += p0;
-		s1 += p1;
-		d += p1;
-	}
-}
-
 void proc0_SSE2_4(const unsigned char *s0, const float *s1, float *d,
 	const int p0, const int p1, const int /*offset_lsb*/)
 {
@@ -166,61 +121,6 @@ vloop:
 		lea edx,[edx+ecx*4]
 		sub eax,1
 		jnz uloop
-	}*/
-	for (int u = 0; u<p1; ++u)
-	{
-		for (int v = 0; v<p1; ++v)
-			d[v] = s0[v] * s1[v];
-		s0 += p0;
-		s1 += p1;
-		d += p1;
-	}
-}
-
-void proc0_SSE_8(const unsigned char *s0, const float *s1, float *d,
-	const int p0, const int p1, const int /*offset_lsb*/)
-{
-	/*__asm
-	{
-		mov esi,s0
-		mov edi,s1
-		mov edx,d
-		mov eax,p1
-		pxor mm7,mm7
-uloop:
-		mov ecx,p1
-		xor ebx,ebx
-vloop:
-		movq mm0,[esi+ebx]
-		movq mm2,mm0
-		punpcklbw mm0,mm7
-		punpckhbw mm2,mm7
-		movq mm1,mm0
-		movq mm3,mm2
-		punpcklbw mm0,mm7
-		punpckhbw mm1,mm7
-		punpcklbw mm2,mm7
-		punpckhbw mm3,mm7
-		cvtpi2ps xmm0,mm0
-		cvtpi2ps xmm1,mm1
-		cvtpi2ps xmm2,mm2
-		cvtpi2ps xmm3,mm3
-		shufps xmm0,xmm1,68
-		shufps xmm2,xmm3,68
-		mulps xmm0,[edi+ebx*4]
-		mulps xmm2,[edi+ebx*4+16]
-		movaps [edx+ebx*4],xmm0
-		movaps [edx+ebx*4+16],xmm2
-		add ebx,8
-		sub ecx,8
-		jnz vloop
-		add esi,p0
-		mov ecx,p1
-		lea edi,[edi+ecx*4]
-		lea edx,[edx+ecx*4]
-		sub eax,1
-		jnz uloop
-		emms
 	}*/
 	for (int u = 0; u<p1; ++u)
 	{
@@ -657,49 +557,6 @@ void dither_C(const float *p, unsigned char *dst, const int src_height,
 	free(dither);
 }
 
-void intcast_SSE_1(const float *p, unsigned char *dst, const int src_height,
-	const int src_width, const int dst_pitch, const int width)
-{
-	/*_asm
-	{
-		mov edx,p
-		mov ecx,dst
-		mov ebx,src_width
-		mov esi,src_height
-yloop:
-		xor edi,edi
-xloop:
-		movss xmm0,[edx+edi*4]
-		addss xmm0,sse_05
-		cvttss2si eax,xmm0
-		cmp eax,255
-		jle check0
-		mov eax,255
-		jmp writeb
-check0:
-		cmp eax,0
-		jge writeb
-		xor eax,eax
-writeb:
-		mov byte ptr[ecx+edi],al
-		add edi,1
-		cmp edi,ebx
-		jl xloop
-		add ecx,dst_pitch
-		mov edi,width
-		lea edx,[edx+edi*4]
-		sub esi,1
-		jnz yloop
-	}*/
-	for (int y = 0; y<src_height; ++y)
-	{
-		for (int x = 0; x<src_width; ++x)
-			dst[x] = min(max((int)(p[x] + 0.5f), 0), 255);
-		p += width;
-		dst += dst_pitch;
-	}
-}
-
 void intcast_SSE2_8(const float *p, unsigned char *dst, const int src_height,
 	const int src_width, const int dst_pitch, const int width)
 {
@@ -941,10 +798,8 @@ void dfttest::conv_result_plane_to_int (int width, int height, int b, int ebuff_
 	{
 		if (dither)
 			dither_C(ebp,dstp,src_height,src_width,dst_pitch,width,dither);
-		else if (!(src_width&7) && (((cpuflags&CPUF_SSE2) && opt == 0) || opt == 3))
+		else if (!(src_width&7) && (((cpuflags&CPUF_SSE2) && opt == 0) || opt == 3 || opt == 2))
 			intcast_SSE2_8(ebp,dstp,src_height,src_width,dst_pitch,width);
-		else if (((cpuflags&CPUF_SSE) && opt == 0) || opt > 1)
-			intcast_SSE_1(ebp,dstp,src_height,src_width,dst_pitch,width);
 		else
 			intcast_C(ebp,dstp,src_height,src_width,dst_pitch,width);
 	}
@@ -2011,12 +1866,12 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 		{
 			if (!(sbsize&7))
 			{
-				pssInfo[i]->proc0 = proc0_SSE_8;
+				pssInfo[i]->proc0 = proc0_SSE2_8;
 				pssInfo[i]->proc1 = proc1_SSE_8;
 			}
 			else if (!(sbsize&3))
 			{
-				pssInfo[i]->proc0 = proc0_SSE_4;
+				pssInfo[i]->proc0 = proc0_SSE2_4;
 				pssInfo[i]->proc1 = proc1_SSE_4;
 			}
 			else
