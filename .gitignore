@@ -1,3 +1,8 @@
 *.VC.opendb
 *.VC.db
 *.suo
+*.exp
+*.res
+*.log
+*.tlog
+*.7z
