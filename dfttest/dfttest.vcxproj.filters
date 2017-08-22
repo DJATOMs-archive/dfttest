@@ -35,9 +35,6 @@
     <ClInclude Include="internal.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="memcpy_amd.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="MersenneTwister.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -60,12 +57,6 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="memcpy_amd_asm.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
-    <MASM Include="memcpy_amd_asm_x64.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
     <MASM Include="PlanarFrame_asm_x64.asm">
       <Filter>Source Files</Filter>
     </MASM>
