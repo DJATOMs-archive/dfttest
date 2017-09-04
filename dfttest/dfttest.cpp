@@ -1,5 +1,5 @@
 /*
-**                    dfttest v1.9.4.1 for Avisynth+
+**                    dfttest v1.9.4.2 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
@@ -22,6 +22,10 @@
 
 /*
 Modifications:
+
+2017.09.04 - DJATOM
+     - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal 
+	 - Compilation: silence #693 for Intel Compiler
 
 2017.08.14 - DJATOM
 	Changes from 1.9.4:
@@ -59,11 +63,14 @@ Modifications:
 	Compatible with the new Avisynth 2.6 colorspaces, excepted Y8.
 */
 
+#ifdef __INTEL_COMPILER
+#pragma warning(disable : 693) 
+#endif
+#pragma warning(disable : 4305)
+
 #include "dfttest.h"
 #include "dfttest_avx.h"
 #include <cassert>
-
-#pragma warning(disable : 4305)
 
 PVideoFrame __stdcall dfttest::GetFrame(int n, IScriptEnvironment *env)
 {
@@ -117,7 +124,7 @@ void proc0_SSE2_4(const unsigned char *s0, const float *s1, float *d,
 			auto s0_loop = _mm_cvtepi32_ps(s0_unp_lo2);
 			auto s1_loop = _mm_load_ps(s1 + v);
 			auto d_reslt = _mm_mul_ps(s0_loop, s1_loop);
-			_mm_store_ps(d + v, d_reslt);
+			_mm_storeu_ps(d + v, d_reslt);
 		}
 		s0 += p0;
 		s1 += p1;
@@ -143,8 +150,8 @@ void proc0_SSE2_8(const unsigned char *s0, const float *s1, float *d,
 			auto s1_loop_hi = _mm_load_ps(s1 + v + 4);
 			auto d_result1 = _mm_mul_ps(s0_loop_lo, s1_loop_lo);
 			auto d_result2 = _mm_mul_ps(s0_loop_hi, s1_loop_hi);
-			_mm_store_ps(d + v, d_result1);
-			_mm_store_ps(d + v + 4, d_result2);
+			_mm_storeu_ps(d + v, d_result1);
+			_mm_storeu_ps(d + v + 4, d_result2);
 		}
 		s0 += p0;
 		s1 += p1;
@@ -190,7 +197,7 @@ void proc0_16_SSE2(const unsigned char *s0, const float *s1, float *d,
 			auto s1_loop = _mm_load_ps(s1 + v);
 			auto d_result = _mm_mul_ps(s0_loop, s1_loop);
 			d_result = _mm_mul_ps(d_result, round);
-			_mm_store_ps(d + v, d_result);
+			_mm_storeu_ps(d + v, d_result);
 		}
 		s0 += p0;
 		s1 += p1;
@@ -850,10 +857,10 @@ void addMean_SSE(float *dftc, const int ccnt, const float *dftc2)
 {
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto dftc2_loop = _mm_load_ps(dftc2 + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto dftc2_loop = _mm_loadu_ps(dftc2 + h);
 		auto dftc_result = _mm_add_ps(dftc2_loop, dftc_loop);
-		_mm_store_ps(dftc + h, dftc_result);
+		_mm_storeu_ps(dftc + h, dftc_result);
 	}
 }
 
