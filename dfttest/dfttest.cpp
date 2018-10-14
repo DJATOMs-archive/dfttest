@@ -1,5 +1,5 @@
 /*
-**                    dfttest v1.9.4.2 for Avisynth+
+**                    dfttest v1.9.4.3 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
@@ -22,6 +22,8 @@
 
 /*
 Modifications:
+2018.10.14 - DJATOM
+     - Fixed one nasty bug, causing crash on non-AVX CPUs.
 
 2017.09.04 - DJATOM
      - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal 
@@ -122,7 +124,7 @@ void proc0_SSE2_4(const unsigned char *s0, const float *s1, float *d,
 			auto s0_unp_lo1 = _mm_unpacklo_epi8(s0_load, zero);
 			auto s0_unp_lo2 = _mm_unpacklo_epi8(s0_unp_lo1, zero);
 			auto s0_loop = _mm_cvtepi32_ps(s0_unp_lo2);
-			auto s1_loop = _mm_load_ps(s1 + v);
+			auto s1_loop = _mm_loadu_ps(s1 + v);
 			auto d_reslt = _mm_mul_ps(s0_loop, s1_loop);
 			_mm_storeu_ps(d + v, d_reslt);
 		}
@@ -146,8 +148,8 @@ void proc0_SSE2_8(const unsigned char *s0, const float *s1, float *d,
 			auto s0_u_hi2 = _mm_unpackhi_epi8(s0_u_lo1, zero);
 			auto s0_loop_lo = _mm_cvtepi32_ps(s0_u_lo2);
 			auto s0_loop_hi = _mm_cvtepi32_ps(s0_u_hi2);
-			auto s1_loop_lo = _mm_load_ps(s1 + v);
-			auto s1_loop_hi = _mm_load_ps(s1 + v + 4);
+			auto s1_loop_lo = _mm_loadu_ps(s1 + v);
+			auto s1_loop_hi = _mm_loadu_ps(s1 + v + 4);
 			auto d_result1 = _mm_mul_ps(s0_loop_lo, s1_loop_lo);
 			auto d_result2 = _mm_mul_ps(s0_loop_hi, s1_loop_hi);
 			_mm_storeu_ps(d + v, d_result1);
@@ -194,7 +196,7 @@ void proc0_16_SSE2(const unsigned char *s0, const float *s1, float *d,
 			auto add = _mm_add_epi16(shift, int_lo);
 			auto s0_loop_i = _mm_unpacklo_epi16(add, zero);
 			auto s0_loop = _mm_cvtepi32_ps(s0_loop_i);
-			auto s1_loop = _mm_load_ps(s1 + v);
+			auto s1_loop = _mm_loadu_ps(s1 + v);
 			auto d_result = _mm_mul_ps(s0_loop, s1_loop);
 			d_result = _mm_mul_ps(d_result, round);
 			_mm_storeu_ps(d + v, d_result);
@@ -831,15 +833,15 @@ void removeMean_C(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
 void removeMean_SSE(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
 {
 	const float gf = dftc[0] / dftgc[0];
-	auto gf_asm = _mm_broadcast_ss(reinterpret_cast<const float*>(&gf));
+	auto gf_asm = _mm_load_ps1(reinterpret_cast<const float*>(&gf));
 	for (int h = 0; h<ccnt; h += 4)
 	{
 		auto dftc_loop = _mm_loadu_ps(dftc + h);
 		auto dftgc_loop = _mm_loadu_ps(dftgc + h);
 		auto dftc2_loop = _mm_loadu_ps(dftc2 + h);
 		auto dftc2_result = _mm_mul_ps(gf_asm, dftgc_loop);
-		_mm_storeu_ps(dftc2 + h, dftc2_result);
 		auto dftc_result = _mm_sub_ps(dftc_loop, dftc2_result);
+		_mm_storeu_ps(dftc2 + h, dftc2_result);
 		_mm_storeu_ps(dftc + h, dftc_result);
 	}
 }
@@ -883,8 +885,8 @@ void filter_0_SSE(float *dftc, const float *sigmas, const int ccnt,
 	auto sse_1em15 = _mm_set_ps1(1e-15f);
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
 		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
 		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
 		auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
@@ -894,7 +896,7 @@ void filter_0_SSE(float *dftc, const float *sigmas, const int ccnt,
 		auto mul2_loop = _mm_mul_ps(sub1_loop, rcp1_loop);
 		auto max1_loop = _mm_max_ps(zero, mul2_loop);
 		auto mul3_loop = _mm_mul_ps(dftc_loop, max1_loop);
-		_mm_store_ps(dftc + h, mul3_loop);
+		_mm_storeu_ps(dftc + h, mul3_loop);
 	}
 }
 
@@ -914,14 +916,14 @@ void filter_1_SSE(float *dftc, const float *sigmas, const int ccnt,
 {
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
 		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
 		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
 		auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
 		auto cmple1_loop = _mm_cmple_ps(sigmas_loop, add1_loop);
 		auto and1_loop = _mm_and_ps(cmple1_loop, dftc_loop);
-		_mm_store_ps(dftc + h, and1_loop);
+		_mm_storeu_ps(dftc + h, and1_loop);
 	}
 }
 
@@ -940,10 +942,10 @@ void filter_2_SSE(float *dftc, const float *sigmas, const int ccnt,
 {
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
 		auto mul_loop = _mm_mul_ps(dftc_loop, sigmas_loop);
-		_mm_store_ps(dftc + h, mul_loop);
+		_mm_storeu_ps(dftc + h, mul_loop);
 	}
 }
 
@@ -972,11 +974,11 @@ void filter_3_SSE(float *dftc, const float *sigmas, const int ccnt,
 	auto sse_ones = _mm_set_ps1(0xFFFFFFFFFFFFFFFF);
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
-		auto sigmas2_loop = _mm_load_ps(sigmas2 + h);
-		auto pmin_loop = _mm_load_ps(pmin + h);
-		auto pmax_loop = _mm_load_ps(pmax + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
+		auto sigmas2_loop = _mm_loadu_ps(sigmas2 + h);
+		auto pmin_loop = _mm_loadu_ps(pmin + h);
+		auto pmax_loop = _mm_loadu_ps(pmax + h);
 		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
 		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
 		auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
@@ -988,7 +990,7 @@ void filter_3_SSE(float *dftc, const float *sigmas, const int ccnt,
 		auto and3_loop = _mm_and_ps(xor1_loop, sigmas2_loop);
 		auto  or1_loop = _mm_or_ps(and3_loop, and2_loop);
 		auto mul2_loop = _mm_mul_ps(or1_loop, dftc_loop);
-		_mm_store_ps(dftc + h, mul2_loop);
+		_mm_storeu_ps(dftc + h, mul2_loop);
 	}
 }
 
@@ -1010,10 +1012,10 @@ void filter_4_SSE(float *dftc, const float *sigmas, const int ccnt,
 	auto sse_1em15 = _mm_set_ps1(1e-15f);
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
-		auto pmin_loop = _mm_load_ps(pmin + h);
-		auto pmax_loop = _mm_load_ps(pmax + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
+		auto pmin_loop = _mm_loadu_ps(pmin + h);
+		auto pmax_loop = _mm_loadu_ps(pmax + h);
 		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
 		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
 		auto add1_loop = _mm_add_ps(sse_1em15, mul1_loop);
@@ -1027,7 +1029,7 @@ void filter_4_SSE(float *dftc, const float *sigmas, const int ccnt,
 		auto sqrt_loop = _mm_sqrt_ps(mul4_loop);
 		auto mul5_loop = _mm_mul_ps(sigmas_loop, sqrt_loop);
 		auto mul6_loop = _mm_mul_ps(mul5_loop, dftc_loop);
-		_mm_store_ps(dftc + h, mul6_loop);
+		_mm_storeu_ps(dftc + h, mul6_loop);
 	}
 }
 
@@ -1052,8 +1054,8 @@ void filter_5_SSE2(float *dftc, const float *sigmas, const int ccnt,
 	auto pmin_zero = _mm_set_ps1(pmin[0]);
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
 		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
 		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
 		auto add1_loop = _mm_add_ps(shuff_loop, mul1_loop);
@@ -1064,7 +1066,7 @@ void filter_5_SSE2(float *dftc, const float *sigmas, const int ccnt,
 		auto max1_loop = _mm_max_ps(zero, mul3_loop);
 		auto pow1_loop = fmath::pow_ps(max1_loop, pmin_zero); // DJATOM: fmath is the most accurate in comparison to powf() (from what I tested)
 		auto mul4_loop = _mm_mul_ps(dftc_loop, pow1_loop);
-		_mm_store_ps(dftc + h, mul4_loop);
+		_mm_storeu_ps(dftc + h, mul4_loop);
 	}
 }
 
@@ -1086,8 +1088,8 @@ void filter_6_SSE(float *dftc, const float *sigmas, const int ccnt,
 	auto sse_1em15 = _mm_set_ps1(1e-15f);
 	for (int h = 0; h<ccnt; h += 4)
 	{
-		auto dftc_loop = _mm_load_ps(dftc + h);
-		auto sigmas_loop = _mm_load_ps(sigmas + h);
+		auto dftc_loop = _mm_loadu_ps(dftc + h);
+		auto sigmas_loop = _mm_loadu_ps(sigmas + h);
 		auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
 		auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
 		auto add1_loop = _mm_add_ps(shuff_loop, mul1_loop);
@@ -1099,7 +1101,7 @@ void filter_6_SSE(float *dftc, const float *sigmas, const int ccnt,
 		auto rsq1_loop = _mm_rsqrt_ps(max1_loop);
 		auto rcp2_loop = _mm_rcp_ps(rsq1_loop);
 		auto mul3_loop = _mm_mul_ps(dftc_loop, rcp2_loop);
-		_mm_store_ps(dftc + h, mul3_loop);
+		_mm_storeu_ps(dftc + h, mul3_loop);
 	}
 }
 
@@ -1573,6 +1575,8 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 				pssInfo[i]->ofs_lsb[b] = 0;
 			}
 		}
+
+#ifdef AVX_BUILD
 		if (((env->GetCPUFlags()&CPUF_AVX) && opt == 0) || opt == 3)
 		{
 			if (!(sbsize & 7))
@@ -1607,6 +1611,9 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
 			else pssInfo[i]->filterCoeffs = filter_4_SSE;
 		}
 		else if (((env->GetCPUFlags()&CPUF_SSE2) && opt == 0) || opt == 2)
+#else
+		if (((env->GetCPUFlags()&CPUF_SSE2) && opt == 0) || opt == 2)
+#endif
 		{
 			if (!(sbsize&7))
 			{

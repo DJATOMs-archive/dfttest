@@ -1,5 +1,5 @@
 /*
-**                    dfttest v1.9.4.2 for Avisynth+
+**                    dfttest v1.9.4.3 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
@@ -20,6 +20,7 @@
 **   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
+#ifdef AVX_BUILD
 #include "dfttest_avx.h"
 
 void removeMean_AVX(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
@@ -51,4 +52,5 @@ void addMean_AVX(float *dftc, const int ccnt, const float *dftc2)
 	}
 	_mm256_zeroupper();
 }
+#endif
 
