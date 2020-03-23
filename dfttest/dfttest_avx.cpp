@@ -22,7 +22,11 @@
 */
 
 #include "dfttest_avx.h"
+#include "avs/config.h"
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("avx")))
+#endif
 void removeMean_AVX(float* dftc, const float* dftgc, const int ccnt, float* dftc2)
 {
   const float gf = dftc[0] / dftgc[0];
@@ -41,6 +45,9 @@ void removeMean_AVX(float* dftc, const float* dftgc, const int ccnt, float* dftc
   _mm256_zeroupper();
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("avx")))
+#endif
 void addMean_AVX(float* dftc, const int ccnt, const float* dftc2)
 {
   for (int h = 0; h < ccnt; h += 8)

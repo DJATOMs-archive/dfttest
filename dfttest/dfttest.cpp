@@ -124,6 +124,9 @@ void proc0_C(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
 void proc0_SSE2_4(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
@@ -147,6 +150,9 @@ void proc0_SSE2_4(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
 void proc0_SSE2_8(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
@@ -192,6 +198,9 @@ void proc0_16_C(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
 void proc0_16_SSE2(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb)
 {
@@ -233,6 +242,9 @@ void proc1_C(const float* s0, const float* s1, float* d,
   }
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
 void proc1_SSE_4(const float* s0, const float* s1, float* d,
   const int p0, const int p1)
 {
