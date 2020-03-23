@@ -564,7 +564,8 @@ void intcast_SSE2_8(const float* p, unsigned char* dst, const int src_height,
 
 PVideoFrame dfttest::GetFrame_S(int n, IScriptEnvironment* env)
 {
-  nlf->pf->copyFrom(child->GetFrame(mapn(n), env), vi_src);
+  PVideoFrame src = child->GetFrame(mapn(n), env);
+  nlf->pf->copyFrom(src, vi_src);
   copyPad(nlf->pf, nlf->ppf, env);
   for (int b = 0; b < 3; ++b)
   {
@@ -608,7 +609,8 @@ PVideoFrame dfttest::GetFrame_T(int n, IScriptEnvironment* env)
       nlFrame* nl = fc->frames[fc->getCachePos(i - n + pos)];
       if (nl->fnum != i)
       {
-        nl->pf->copyFrom(child->GetFrame(mapn(i), env), vi_src);
+        PVideoFrame src = child->GetFrame(mapn(i), env);
+        nl->pf->copyFrom(src, vi_src);
         copyPad(nl->pf, nl->ppf, env);
         nl->setFNum(i);
       }
@@ -671,7 +673,8 @@ PVideoFrame dfttest::GetFrame_T(int n, IScriptEnvironment* env)
         nlFrame* nl = fc->frames[fc->getCachePos(i - z)];
         if (nl->fnum != i)
         {
-          nl->pf->copyFrom(child->GetFrame(mapn(i), env), vi_src);
+          PVideoFrame src = child->GetFrame(mapn(i), env);
+          nl->pf->copyFrom(src, vi_src);
           copyPad(nl->pf, nl->ppf, env);
           nl->setFNum(i);
         }
@@ -1398,9 +1401,9 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
   PlanarFrame* padPF = new PlanarFrame();
   padPF->createPlanar(noyl * lsb_in_hmul, noyc * lsb_in_hmul, noxl, noxc, false, false, 1, 8); // DJATOM: line updated with hardcoded defaults. Now it works with 8-bit frame using updated PlanarFrame
   if (tbsize > 1)
-    fc = new nlCache(tbsize, padPF, (VideoInfo)vi_src);
+    fc = new nlCache(tbsize, padPF, vi_src);
   else
-    nlf = new nlFrame(padPF, (VideoInfo)vi_src);
+    nlf = new nlFrame(padPF, vi_src);
   const int ebcount = (tbsize > 1 && tmode == 1) ? tbsize : 1;
   ebuff = (float**)calloc(ebcount * 3, sizeof(float*));
   for (int q = 0; q < ebcount; ++q)

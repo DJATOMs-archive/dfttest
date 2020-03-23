@@ -125,10 +125,10 @@ class nlFrame
 public:
   int fnum;
   PlanarFrame* pf, * ppf;
-  nlFrame::nlFrame();
-  nlFrame::nlFrame(PlanarFrame* tp, VideoInfo& vi);
-  nlFrame::~nlFrame();
-  void nlFrame::setFNum(int i);
+  nlFrame();
+  nlFrame(PlanarFrame* tp, VideoInfo& vi);
+  ~nlFrame();
+  void setFNum(int i);
 };
 
 class nlCache
@@ -136,11 +136,11 @@ class nlCache
 public:
   nlFrame** frames;
   int start_pos, size;
-  nlCache::nlCache();
-  nlCache::nlCache(int _size, PlanarFrame* tp, VideoInfo& vi);
-  nlCache::~nlCache();
-  void nlCache::resetCacheStart(int first, int last);
-  int nlCache::getCachePos(int n);
+  nlCache();
+  nlCache(int _size, PlanarFrame* tp, VideoInfo& vi);
+  ~nlCache();
+  void resetCacheStart(int first, int last);
+  int getCachePos(int n);
 };
 
 struct PS_INFO {
@@ -199,8 +199,8 @@ private:
   HANDLE* thds;
   CRITICAL_SECTION csect;
   const char* sfile, * sfile2, * pminfile, * pmaxfile;
-  VideoInfo	vi_src;
-  VideoInfo	vi_byte;
+  VideoInfo vi_src;
+  VideoInfo vi_byte;
   fftwf_destroy_plan_proc fftwf_destroy_plan;
   fftwf_plan_dft_r2c_3d_proc fftwf_plan_dft_r2c_3d;
   fftwf_plan_dft_c2r_3d_proc fftwf_plan_dft_c2r_3d;
@@ -208,27 +208,27 @@ private:
   fftwf_plan_dft_c2r_2d_proc fftwf_plan_dft_c2r_2d;
   fftwf_execute_dft_r2c_proc fftwf_execute_dft_r2c;
   fftwf_execute_dft_c2r_proc fftwf_execute_dft_c2r;
-  int dfttest::mapn(int n);
-  void dfttest::copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* env);
-  PVideoFrame dfttest::GetFrame_S(int n, IScriptEnvironment* env);
-  PVideoFrame dfttest::GetFrame_T(int n, IScriptEnvironment* env);
-  PVideoFrame dfttest::build_output_frame(IScriptEnvironment* env);
-  void dfttest::bypass_plane(PlanarFrame& frame, int plane);
-  void dfttest::conv_result_plane_to_int(int width, int height, int b, int ebuff_index, IScriptEnvironment* env);
-  void dfttest::merge_msb_lsb();
-  void dfttest::processTemporalBlock(int pos);
-  void dfttest::loadFile(float* dest, const char* src, const float wscale,
+  int mapn(int n);
+  void copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* env);
+  PVideoFrame GetFrame_S(int n, IScriptEnvironment* env);
+  PVideoFrame GetFrame_T(int n, IScriptEnvironment* env);
+  PVideoFrame build_output_frame(IScriptEnvironment* env);
+  void bypass_plane(PlanarFrame& frame, int plane);
+  void conv_result_plane_to_int(int width, int height, int b, int ebuff_index, IScriptEnvironment* env);
+  void merge_msb_lsb();
+  void processTemporalBlock(int pos);
+  void loadFile(float* dest, const char* src, const float wscale,
     IScriptEnvironment* env);
-  void dfttest::getNoiseSpectrum(const char* fname, const char* nstring,
+  void getNoiseSpectrum(const char* fname, const char* nstring,
     float* dest, const float wscale, IScriptEnvironment* env);
-  void dfttest::sigmaFromString(float* dest, const char* sstring, const char* ssx,
+  void sigmaFromString(float* dest, const char* sstring, const char* ssx,
     const char* ssy, const char* sst, const float wscale, IScriptEnvironment* env);
-  void dfttest::outputSigmaFile(const char* fname, const float* s, const float scale,
+  void outputSigmaFile(const char* fname, const float* s, const float scale,
     const bool zmean2);
 
 public:
-  PVideoFrame __stdcall dfttest::GetFrame(int n, IScriptEnvironment* env);
-  dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype,
+  PVideoFrame __stdcall GetFrame(int n, IScriptEnvironment* env) override;
+  dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype,
     float _sigma, float _sigma2, float _pmin, float _pmax, int _sbsize,
     int _smode, int _sosize, int _tbsize, int _tmode, int _tosize,
     int _swin, int _twin, double _sbeta, double _tbeta, bool _zmean,
@@ -238,8 +238,8 @@ public:
     const char* _ssy, const char* _sst, const int _dither,
     bool _lsb_in_flag, bool _lsb_out_flag, bool _quiet_flag,
     IScriptEnvironment* env);
-  dfttest::~dfttest();
-  int __stdcall dfttest::SetCacheHints(int cachehints, int frame_range)
+  ~dfttest();
+  int __stdcall SetCacheHints(int cachehints, int frame_range)
   {
     switch (cachehints)
     {
