@@ -23,6 +23,6 @@
 #ifdef AVX_BUILD
 #include <immintrin.h>
 
-void removeMean_AVX(float *dftc, const float *dftgc, const int ccnt, float *dftc2);
-void addMean_AVX(float *dftc, const int ccnt, const float *dftc2);
+void removeMean_AVX(float* dftc, const float* dftgc, const int ccnt, float* dftc2);
+void addMean_AVX(float* dftc, const int ccnt, const float* dftc2);
 #endif

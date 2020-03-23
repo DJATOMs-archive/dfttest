@@ -23,34 +23,34 @@
 #ifdef AVX_BUILD
 #include "dfttest_avx.h"
 
-void removeMean_AVX(float *dftc, const float *dftgc, const int ccnt, float *dftc2)
+void removeMean_AVX(float* dftc, const float* dftgc, const int ccnt, float* dftc2)
 {
-	const float gf = dftc[0] / dftgc[0];
-	auto gf_asm = _mm256_broadcast_ss(reinterpret_cast<const float*>(&gf));
+  const float gf = dftc[0] / dftgc[0];
+  auto gf_asm = _mm256_broadcast_ss(reinterpret_cast<const float*>(&gf));
 
-	for (int h = 0; h < ccnt; h += 8)
-	{
-		auto dftc_loop = _mm256_loadu_ps(dftc + h);
-		auto dftgc_loop = _mm256_loadu_ps(dftgc + h);
-		auto dftc2_loop  = _mm256_loadu_ps(dftc2 + h);
-		auto dftc2_result = _mm256_mul_ps(gf_asm, dftgc_loop);
-		_mm256_storeu_ps(dftc2 + h, dftc2_result);
-		auto dftc_result = _mm256_sub_ps(dftc_loop, dftc2_result);
-		_mm256_storeu_ps(dftc + h, dftc_result);
-	}
-	_mm256_zeroupper();
+  for (int h = 0; h < ccnt; h += 8)
+  {
+    auto dftc_loop = _mm256_loadu_ps(dftc + h);
+    auto dftgc_loop = _mm256_loadu_ps(dftgc + h);
+    auto dftc2_loop = _mm256_loadu_ps(dftc2 + h);
+    auto dftc2_result = _mm256_mul_ps(gf_asm, dftgc_loop);
+    _mm256_storeu_ps(dftc2 + h, dftc2_result);
+    auto dftc_result = _mm256_sub_ps(dftc_loop, dftc2_result);
+    _mm256_storeu_ps(dftc + h, dftc_result);
+  }
+  _mm256_zeroupper();
 }
 
-void addMean_AVX(float *dftc, const int ccnt, const float *dftc2)
+void addMean_AVX(float* dftc, const int ccnt, const float* dftc2)
 {
-	for (int h = 0; h < ccnt; h += 8)
-	{
-		auto dftc_loop = _mm256_loadu_ps(dftc + h);
-		auto dftc2_loop = _mm256_loadu_ps(dftc2 + h);
-		auto dftc_result = _mm256_add_ps(dftc2_loop, dftc_loop);
-		_mm256_storeu_ps(dftc + h, dftc_result);
-	}
-	_mm256_zeroupper();
+  for (int h = 0; h < ccnt; h += 8)
+  {
+    auto dftc_loop = _mm256_loadu_ps(dftc + h);
+    auto dftc2_loop = _mm256_loadu_ps(dftc2 + h);
+    auto dftc_result = _mm256_add_ps(dftc2_loop, dftc_loop);
+    _mm256_storeu_ps(dftc + h, dftc_result);
+  }
+  _mm256_zeroupper();
 }
 #endif
 

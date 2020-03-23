@@ -39,15 +39,15 @@
 #include "avisynth.h"
 
 class _PixelClip {
-	enum { buffer = 320 };
-	BYTE clip[256 + buffer * 2];
+  enum { buffer = 320 };
+  BYTE clip[256 + buffer * 2];
 public:
-	_PixelClip() {
-		memset(clip, 0, buffer);
-		for (int i = 0; i<256; ++i) clip[i + buffer] = i;
-		memset(clip + buffer + 256, 255, buffer);
-	}
-	BYTE operator()(int i) { return clip[i + buffer]; }
+  _PixelClip() {
+    memset(clip, 0, buffer);
+    for (int i = 0; i < 256; ++i) clip[i + buffer] = i;
+    memset(clip + buffer + 256, 255, buffer);
+  }
+  BYTE operator()(int i) { return clip[i + buffer]; }
 };
 
 extern _PixelClip PixelClip;

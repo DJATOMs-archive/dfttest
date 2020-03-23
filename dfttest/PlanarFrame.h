@@ -1,7 +1,7 @@
 /*
-**   My PlanarFrame class... fast mmx/sse2 YUY2 packed to planar and planar 
+**   My PlanarFrame class... fast mmx/sse2 YUY2 packed to planar and planar
 **   to packed conversions, and always gives 16 bit alignment for all
-**   planes.  Supports Y8/YV12/YV16/YV24/YUY2/RGB24 frames from avisynth, can do any planar format 
+**   planes.  Supports Y8/YV12/YV16/YV24/YUY2/RGB24 frames from avisynth, can do any planar format
 **   internally.
 **
 **   Copyright (C) 2005-2006 Kevin Stone
@@ -41,69 +41,69 @@
 class PlanarFrame
 {
 private:
-	bool useSIMD;
-	int cpu;
-	int ypitch,uvpitch;
-	int ywidth,uvwidth;
-	int yheight,uvheight;
-	bool alloc_ok;
-	
-	bool grey,isRGBPfamily,isAlphaChannel;
-	uint8_t pixelsize; // AVS16
-	uint8_t bits_per_pixel;
-	
-	uint8_t *planar_1,*planar_2,*planar_3,*planar_4;
-	bool allocSpace(VideoInfo &viInfo);
-	bool allocSpace(int specs[4],bool rgbplanar,bool alphaplanar,uint8_t _pixelsize,uint8_t _bits_per_pixel);
-	int getCPUInfo(void);
-	int checkCPU(void);
-	bool copyInternalFrom(PVideoFrame &frame,VideoInfo &viInfo);
-	bool copyInternalFrom(PlanarFrame &frame);
-	bool copyInternalTo(PVideoFrame &frame,VideoInfo &viInfo);
-	bool copyInternalTo(PlanarFrame &frame);
-	bool copyInternalPlaneTo(PlanarFrame &frame,uint8_t plane);
-	bool copyInternalPlaneTo16Part(PlanarFrame &frame, uint8_t plane, int part);
-	bool copyInternalPlaneTo16Round(PlanarFrame &frame, uint8_t plane);
-	void conv422toYUY2(uint8_t *py,uint8_t *pu,uint8_t *pv,uint8_t *dst,int pitch1Y,int pitch1UV,int pitch2,
-		int width,int height);
-	void conv444toRGB24(uint8_t *py,uint8_t *pu,uint8_t *pv,uint8_t *dst,int pitch1Y,int pitch1UV,int pitch2,
-		int width,int height);
-	void PlanarFrame::AddLsb(unsigned char* dstp, int dst_pitch, const unsigned char* srcp, 
-			int src_pitch, int row_size, int height);
+  bool useSIMD;
+  int cpu;
+  int ypitch, uvpitch;
+  int ywidth, uvwidth;
+  int yheight, uvheight;
+  bool alloc_ok;
 
-	static int get_row_size_safe (const PVideoFrame &frame, const VideoInfo &viInfo, int plane_id);
-	static int get_height_safe (const PVideoFrame &frame, const VideoInfo &viInfo, int plane_id);
+  bool grey, isRGBPfamily, isAlphaChannel;
+  uint8_t pixelsize; // AVS16
+  uint8_t bits_per_pixel;
+
+  uint8_t* planar_1, * planar_2, * planar_3, * planar_4;
+  bool allocSpace(VideoInfo& viInfo);
+  bool allocSpace(int specs[4], bool rgbplanar, bool alphaplanar, uint8_t _pixelsize, uint8_t _bits_per_pixel);
+  int getCPUInfo(void);
+  int checkCPU(void);
+  bool copyInternalFrom(PVideoFrame& frame, VideoInfo& viInfo);
+  bool copyInternalFrom(PlanarFrame& frame);
+  bool copyInternalTo(PVideoFrame& frame, VideoInfo& viInfo);
+  bool copyInternalTo(PlanarFrame& frame);
+  bool copyInternalPlaneTo(PlanarFrame& frame, uint8_t plane);
+  bool copyInternalPlaneTo16Part(PlanarFrame& frame, uint8_t plane, int part);
+  bool copyInternalPlaneTo16Round(PlanarFrame& frame, uint8_t plane);
+  void conv422toYUY2(uint8_t* py, uint8_t* pu, uint8_t* pv, uint8_t* dst, int pitch1Y, int pitch1UV, int pitch2,
+    int width, int height);
+  void conv444toRGB24(uint8_t* py, uint8_t* pu, uint8_t* pv, uint8_t* dst, int pitch1Y, int pitch1UV, int pitch2,
+    int width, int height);
+  void PlanarFrame::AddLsb(unsigned char* dstp, int dst_pitch, const unsigned char* srcp,
+    int src_pitch, int row_size, int height);
+
+  static int get_row_size_safe(const PVideoFrame& frame, const VideoInfo& viInfo, int plane_id);
+  static int get_height_safe(const PVideoFrame& frame, const VideoInfo& viInfo, int plane_id);
 
 public:
-	PlanarFrame(void);
-	PlanarFrame(VideoInfo &viInfo);
-	virtual ~PlanarFrame(void);
-	bool GetAllocStatus(void) {return(alloc_ok);}
-	bool createPlanar(int yheight,int uvheight,int ywidth,int uvwidth,bool rgbplanar,bool alphaplanar,uint8_t pixelsize,uint8_t bits_per_pixel);
-	bool createPlanar(int height,int width,uint8_t chroma_format,bool rgbplanar,bool alphaplanar,uint8_t pixelsize,uint8_t bits_per_pixel);
-	bool createFromProfile(VideoInfo &viInfo);
-	bool createFromFrame(PVideoFrame &frame,VideoInfo &viInfo);
-	bool createFromPlanar(PlanarFrame &frame);
-	bool copyFrom(PVideoFrame &frame,VideoInfo &viInfo);
-	bool copyTo(PVideoFrame &frame,VideoInfo &viInfo);
-	bool copyFrom(PlanarFrame &frame);
-	bool copyTo(PlanarFrame &frame);
-	bool copyChromaTo(PlanarFrame &dst);
-	bool copyPlaneTo(PlanarFrame &dst, uint8_t plane);
-	bool copyPlaneTo16Part(PlanarFrame &dst, uint8_t plane, int part);
-	bool copyPlaneTo16Round(PlanarFrame &dst, uint8_t plane);
-	void freePlanar();
-	uint8_t* GetPtr(uint8_t plane);
-	int GetWidth(uint8_t plane);
-	int GetHeight(uint8_t plane);
-	int GetPitch(uint8_t plane);
-	int getCPUFlags(void) {return cpu;}
-	inline void BitBlt(uint8_t *dstp,int dst_pitch,const uint8_t *srcp,int src_pitch,int row_size,int height);
-	PlanarFrame& PlanarFrame::operator=(PlanarFrame &ob2);
-	void convYUY2to422(const uint8_t *src,uint8_t *py,uint8_t *pu,uint8_t *pv,int pitch1,int pitch2Y,int pitch2UV,
-		int width,int height);
-	void convRGB24to444(const uint8_t *src,uint8_t *py,uint8_t *pu,uint8_t *pv,int pitch1,int pitch2Y,int pitch2UV,
-		int width,int height);
+  PlanarFrame(void);
+  PlanarFrame(VideoInfo& viInfo);
+  virtual ~PlanarFrame(void);
+  bool GetAllocStatus(void) { return(alloc_ok); }
+  bool createPlanar(int yheight, int uvheight, int ywidth, int uvwidth, bool rgbplanar, bool alphaplanar, uint8_t pixelsize, uint8_t bits_per_pixel);
+  bool createPlanar(int height, int width, uint8_t chroma_format, bool rgbplanar, bool alphaplanar, uint8_t pixelsize, uint8_t bits_per_pixel);
+  bool createFromProfile(VideoInfo& viInfo);
+  bool createFromFrame(PVideoFrame& frame, VideoInfo& viInfo);
+  bool createFromPlanar(PlanarFrame& frame);
+  bool copyFrom(PVideoFrame& frame, VideoInfo& viInfo);
+  bool copyTo(PVideoFrame& frame, VideoInfo& viInfo);
+  bool copyFrom(PlanarFrame& frame);
+  bool copyTo(PlanarFrame& frame);
+  bool copyChromaTo(PlanarFrame& dst);
+  bool copyPlaneTo(PlanarFrame& dst, uint8_t plane);
+  bool copyPlaneTo16Part(PlanarFrame& dst, uint8_t plane, int part);
+  bool copyPlaneTo16Round(PlanarFrame& dst, uint8_t plane);
+  void freePlanar();
+  uint8_t* GetPtr(uint8_t plane);
+  int GetWidth(uint8_t plane);
+  int GetHeight(uint8_t plane);
+  int GetPitch(uint8_t plane);
+  int getCPUFlags(void) { return cpu; }
+  inline void BitBlt(uint8_t* dstp, int dst_pitch, const uint8_t* srcp, int src_pitch, int row_size, int height);
+  PlanarFrame& PlanarFrame::operator=(PlanarFrame& ob2);
+  void convYUY2to422(const uint8_t* src, uint8_t* py, uint8_t* pu, uint8_t* pv, int pitch1, int pitch2Y, int pitch2UV,
+    int width, int height);
+  void convRGB24to444(const uint8_t* src, uint8_t* py, uint8_t* pu, uint8_t* pv, int pitch1, int pitch2Y, int pitch2UV,
+    int width, int height);
 };
 
 #endif
