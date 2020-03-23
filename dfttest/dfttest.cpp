@@ -22,6 +22,9 @@
 
 /*
 Modifications:
+2020.03.23 - pinterf
+     - make fft3w plans thread safe
+
 2018.10.14 - DJATOM
      - Fixed one nasty bug, causing crash on non-AVX CPUs.
 
@@ -73,6 +76,11 @@ Modifications:
 #include "dfttest.h"
 #include "dfttest_avx.h"
 #include <cassert>
+#include <mutex>
+
+// FFTW is not thread-safe, need to guard around its functions (except fftw_execute).
+// http://www.fftw.org/fftw3_doc/Thread-safety.html#Thread-safety
+static std::mutex fftw_mutex; // defined as static
 
 PVideoFrame __stdcall dfttest::GetFrame(int n, IScriptEnvironment* env)
 {
@@ -1430,12 +1438,18 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
   createWindow(hw, tmode, tbsize, tosize, twin, tbeta, smode, sbsize, sosize, swin, sbeta);
   float* dftgr = (float*)_aligned_malloc(bvolume * sizeof(float), 16);
   dftgc = (fftwf_complex*)_aligned_malloc(sizeof(fftwf_complex) * (ccnt + 11), 16);
-  if (tbsize > 1)
-    ftg = fftwf_plan_dft_r2c_3d(tbsize, sbsize, sbsize, dftgr, dftgc,
-      FFTW_PATIENT | FFTW_DESTROY_INPUT);
-  else
-    ftg = fftwf_plan_dft_r2c_2d(sbsize, sbsize, dftgr, dftgc,
-      FFTW_PATIENT | FFTW_DESTROY_INPUT);
+  
+  // FFTW plan construction and destruction are not thread-safe.
+  {
+    std::lock_guard<std::mutex> lock(fftw_mutex);
+
+    if (tbsize > 1)
+      ftg = fftwf_plan_dft_r2c_3d(tbsize, sbsize, sbsize, dftgr, dftgc,
+        FFTW_PATIENT | FFTW_DESTROY_INPUT);
+    else
+      ftg = fftwf_plan_dft_r2c_2d(sbsize, sbsize, dftgr, dftgc,
+        FFTW_PATIENT | FFTW_DESTROY_INPUT);
+  }
   float wscale = 0.0f;
   const float* hwT = hw;
   float* dftgrT = dftgr;
@@ -1493,15 +1507,20 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
       pmaxs[i] = pmax / wscale;
   }
   fftwf_complex* ta = (fftwf_complex*)_aligned_malloc(sizeof(fftwf_complex) * (ccnt + 3), 16);
-  if (tbsize > 1)
+  // FFTW plan construction and destruction are not thread-safe.
+  // http://www.fftw.org/fftw3_doc/Thread-safety.html#Thread-safety
   {
-    ft = fftwf_plan_dft_r2c_3d(tbsize, sbsize, sbsize, dftgr, ta, FFTW_PATIENT | FFTW_DESTROY_INPUT);
-    fti = fftwf_plan_dft_c2r_3d(tbsize, sbsize, sbsize, ta, dftgr, FFTW_PATIENT | FFTW_DESTROY_INPUT);
-  }
-  else
-  {
-    ft = fftwf_plan_dft_r2c_2d(sbsize, sbsize, dftgr, ta, FFTW_PATIENT | FFTW_DESTROY_INPUT);
-    fti = fftwf_plan_dft_c2r_2d(sbsize, sbsize, ta, dftgr, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+    std::lock_guard<std::mutex> lock(fftw_mutex);
+    if (tbsize > 1)
+    {
+      ft = fftwf_plan_dft_r2c_3d(tbsize, sbsize, sbsize, dftgr, ta, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+      fti = fftwf_plan_dft_c2r_3d(tbsize, sbsize, sbsize, ta, dftgr, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+    }
+    else
+    {
+      ft = fftwf_plan_dft_r2c_2d(sbsize, sbsize, dftgr, ta, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+      fti = fftwf_plan_dft_c2r_2d(sbsize, sbsize, ta, dftgr, FFTW_PATIENT | FFTW_DESTROY_INPUT);
+    }
   }
   _aligned_free(ta);
   _aligned_free(dftgr);
