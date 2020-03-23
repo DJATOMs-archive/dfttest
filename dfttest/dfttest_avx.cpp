@@ -1,5 +1,5 @@
 /*
-**                    dfttest v1.9.4.4 for Avisynth+
+**                    dfttest for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **

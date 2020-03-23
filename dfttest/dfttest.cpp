@@ -1,5 +1,5 @@
 /*
-**                    dfttest v1.9.4.4 for Avisynth+
+**                    dfttest for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
@@ -23,19 +23,28 @@
 
 /*
 Modifications:
-2020.03.23 - pinterf
-   - fix: make fft3w plans thread safe
-   - MSVC project to VS2019, add v142, v141_xp and ClangCl config.
-   - refresh avisynth headers
-   - source to C++17 strict conformance
-   - AVX option is always available
+2020.03.23 v1.9.5
+- Avisynth+ high bit depth support 10-32 bits (base version, needs more optimization)
+  new formats: planar RGB
+  Y (greyscale)
+- Fix: minor image noise at stacked16 input (lsb_in = true)
+  proc0_16_SSE2 contained a bug: every 2nd pixel contains traces of the lsb part of pixels 4 positions to the right
+  Regression since 1.9.4
+- source: no more external asm, replace YUY2 converter with simd code
+
+2020.03.23 v1.9.4.4 - pinterf
+- fix: make fft3w plans thread safe
+- MSVC project to VS2019, add v142, v141_xp and ClangCl config.
+- refresh avisynth headers
+- source to C++17 strict conformance
+- AVX option is always available
 
 2018.10.14 - DJATOM
-   - Fixed one nasty bug, causing crash on non-AVX CPUs.
+- Fixed one nasty bug, causing crash on non-AVX CPUs.
 
 2017.09.04 - DJATOM
-   - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
-   - Compilation: silence #693 for Intel Compiler
+- Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
+- Compilation: silence #693 for Intel Compiler
 
 2017.08.14 - DJATOM
   Changes from 1.9.4:
@@ -111,7 +120,7 @@ unsigned __stdcall threadPool(void* ps)
   }
 }
 
-void proc0_C(const unsigned char* s0, const float* s1, float* d,
+void proc0_uint8_to_float_C(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
   for (int u = 0; u < p1; ++u)
@@ -124,10 +133,45 @@ void proc0_C(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
+template<int bits_per_pixel>
+void proc0_uint16_to_float_C(const unsigned char* s0, const float* s1, float* d,
+  const int p0, const int p1, const int /*offset_lsb*/)
+{
+  constexpr float scaler = 1.0f / (1 << (bits_per_pixel - 8)); // back to the 0.0 - 255.0 range
+  for (int u = 0; u < p1; ++u)
+  {
+    for (int v = 0; v < p1; ++v)
+      d[v] = reinterpret_cast<const uint16_t *>(s0)[v] * s1[v] * scaler;
+    s0 += p0;
+    s1 += p1;
+    d += p1;
+  }
+}
+
+template<bool chroma>
+void proc0_float_to_float_C(const unsigned char* s0, const float* s1, float* d,
+  const int p0, const int p1, const int /*offset_lsb*/)
+{
+  constexpr float scaler = 255.0f; // from 0..1 =-0.5..+0.5 back to the *256 range
+  for (int u = 0; u < p1; ++u)
+  {
+    for (int v = 0; v < p1; ++v) {
+      float pix = reinterpret_cast<const float*>(s0)[v];
+      if constexpr (chroma)
+        pix = pix + 0.5f; // chroma center is zero
+      d[v] = pix * s1[v] * scaler;
+    }
+    s0 += p0;
+    s1 += p1;
+    d += p1;
+  }
+}
+
 #if defined(GCC) || defined(CLANG)
 __attribute__((__target__("sse2")))
 #endif
-void proc0_SSE2_4(const unsigned char* s0, const float* s1, float* d,
+// 8 bit data -> float, 4 pixels at a time
+void proc0_uint8_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
   auto zero = _mm_setzero_si128();
@@ -135,14 +179,14 @@ void proc0_SSE2_4(const unsigned char* s0, const float* s1, float* d,
   {
     for (int v = 0; v < p1; v += 4)
     {
-      /* Intel's compiller works fine with aligned versions, MS randomly crashing */
-      auto s0_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v));
-      auto s0_unp_lo1 = _mm_unpacklo_epi8(s0_load, zero);
-      auto s0_unp_lo2 = _mm_unpacklo_epi8(s0_unp_lo1, zero);
-      auto s0_loop = _mm_cvtepi32_ps(s0_unp_lo2);
-      auto s1_loop = _mm_loadu_ps(s1 + v);
-      auto d_reslt = _mm_mul_ps(s0_loop, s1_loop);
-      _mm_storeu_ps(d + v, d_reslt);
+      auto src = _mm_loadu_si32(reinterpret_cast<const __m128i*>(s0 + v));
+      // 8 to 32 bits
+      auto int4x32 = _mm_unpacklo_epi8(_mm_unpacklo_epi8(src, zero) , zero);
+      auto float4x32 = _mm_cvtepi32_ps(int4x32);
+      // mul by weight
+      auto w = _mm_loadu_ps(s1 + v);
+      auto result = _mm_mul_ps(float4x32, w);
+      _mm_storeu_ps(d + v, result);
     }
     s0 += p0;
     s1 += p1;
@@ -153,7 +197,8 @@ void proc0_SSE2_4(const unsigned char* s0, const float* s1, float* d,
 #if defined(GCC) || defined(CLANG)
 __attribute__((__target__("sse2")))
 #endif
-void proc0_SSE2_8(const unsigned char* s0, const float* s1, float* d,
+// 8 bit data -> float, 8 pixels at a time
+void proc0_uint8_to_float_SSE2_8pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
   auto zero = _mm_setzero_si128();
@@ -161,18 +206,22 @@ void proc0_SSE2_8(const unsigned char* s0, const float* s1, float* d,
   {
     for (int v = 0; v < p1; v += 8)
     {
-      auto s0_load = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v));
-      auto s0_u_lo1 = _mm_unpacklo_epi8(s0_load, zero);
-      auto s0_u_lo2 = _mm_unpacklo_epi8(s0_u_lo1, zero);
-      auto s0_u_hi2 = _mm_unpackhi_epi8(s0_u_lo1, zero);
-      auto s0_loop_lo = _mm_cvtepi32_ps(s0_u_lo2);
-      auto s0_loop_hi = _mm_cvtepi32_ps(s0_u_hi2);
-      auto s1_loop_lo = _mm_loadu_ps(s1 + v);
-      auto s1_loop_hi = _mm_loadu_ps(s1 + v + 4);
-      auto d_result1 = _mm_mul_ps(s0_loop_lo, s1_loop_lo);
-      auto d_result2 = _mm_mul_ps(s0_loop_hi, s1_loop_hi);
-      _mm_storeu_ps(d + v, d_result1);
-      _mm_storeu_ps(d + v + 4, d_result2);
+      auto src = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(s0 + v));
+      // 8x 8bit->8x16 bits
+      auto src16 = _mm_unpacklo_epi8(src, zero);
+      // 2x4x16 bits -> 2x4xint
+      auto int4x32_lo = _mm_unpacklo_epi16(src16, zero);
+      auto int4x32_hi = _mm_unpackhi_epi16(src16, zero);
+      // int -> float
+      auto float4x32_lo = _mm_cvtepi32_ps(int4x32_lo);
+      auto float4x32_hi = _mm_cvtepi32_ps(int4x32_hi);
+      // mul by weight
+      auto w_lo = _mm_loadu_ps(s1 + v);
+      auto w_hi = _mm_loadu_ps(s1 + v + 4);
+      auto result_lo = _mm_mul_ps(float4x32_lo, w_lo);
+      auto result_hi = _mm_mul_ps(float4x32_hi, w_hi);
+      _mm_storeu_ps(d + v, result_lo);
+      _mm_storeu_ps(d + v + 4, result_hi);
     }
     s0 += p0;
     s1 += p1;
@@ -180,16 +229,17 @@ void proc0_SSE2_8(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
-void proc0_16_C(const unsigned char* s0, const float* s1, float* d,
+// stacked16 -> float
+void proc0_stacked16_to_float_C(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb)
 {
   for (int u = 0; u < p1; ++u)
   {
     for (int v = 0; v < p1; ++v)
     {
-      const int		msb = s0[v];
-      const int		lsb = s0[v + offset_lsb];
-      const int		val = (msb << 8) + lsb;
+      const int msb = s0[v];
+      const int lsb = s0[v + offset_lsb];
+      const int val = (msb << 8) + lsb;
       d[v] = val * s1[v] * (1.0f / 256);
     }
     s0 += p0;
@@ -201,27 +251,46 @@ void proc0_16_C(const unsigned char* s0, const float* s1, float* d,
 #if defined(GCC) || defined(CLANG)
 __attribute__((__target__("sse2")))
 #endif
-void proc0_16_SSE2(const unsigned char* s0, const float* s1, float* d,
+// stacked16 -> float
+void proc0_stacked16_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb)
 {
   auto zero = _mm_setzero_si128();
-  auto round = _mm_set_ps1(1.0f / 256);
+  auto scaler = _mm_set_ps1(1.0f / 256);
   for (int u = 0; u < p1; ++u)
   {
     for (int v = 0; v < p1; v += 4)
     {
+#if 0
       auto msb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v));
       auto lsb = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v + offset_lsb));
-      auto int_lo = _mm_unpacklo_epi8(lsb, msb);
-      auto int_hi = _mm_unpackhi_epi8(lsb, msb);
-      auto shift = _mm_unpacklo_epi8(_mm_slli_epi16(int_hi, 8), zero);
-      auto add = _mm_add_epi16(shift, int_lo);
-      auto s0_loop_i = _mm_unpacklo_epi16(add, zero);
-      auto s0_loop = _mm_cvtepi32_ps(s0_loop_i);
-      auto s1_loop = _mm_loadu_ps(s1 + v);
-      auto d_result = _mm_mul_ps(s0_loop, s1_loop);
-      d_result = _mm_mul_ps(d_result, round);
-      _mm_storeu_ps(d + v, d_result);
+      // msb ABCDEFGHIJKLMNOP  integer  8 bit
+      // lsb abcdefghijklmnop  fraction 8 bit
+      auto int_lo = _mm_unpacklo_epi8(lsb, msb); // iIjJkKlLmMnNoOpP
+      auto int_hi = _mm_unpackhi_epi8(lsb, msb); // aAbBcCdDeEfFgGhH
+      // slli epi 16, 8                          // A0B0C0D0E0F0G0H0
+      auto shift = _mm_unpacklo_epi8(_mm_slli_epi16(int_hi, 8), zero); // 00 E0 00 F0 00 G0 00 H0
+      auto add = _mm_add_epi16(shift, int_lo); // lower part: mM+E0 nN+00 oO+G0 pP+H0
+      // ???? bug.
+      // stacked16 input conversion is wrong! Every 2nd pixel contains traces of the lsb part of pixels 4 positions on the right
+      // e.g: stacked B0E3 B0E3 B0E3 B0E3 (16 bit pixels msb;lsb) -> b0e3 b1c6 b0e3 b1c6
+#else
+      // stacked16 to float: fixed in 1.9.5
+      auto msb = _mm_loadu_si32(reinterpret_cast<const __m128i*>(s0 + v));
+      auto lsb = _mm_loadu_si32(reinterpret_cast<const __m128i*>(s0 + v + offset_lsb));
+      // 4x16
+      auto int4x16 = _mm_unpacklo_epi8(lsb, msb);
+#endif
+      //4x16->4x32
+      auto int4x32 = _mm_unpacklo_epi16(int4x16, zero);
+      // int->float
+      auto float4x32 = _mm_cvtepi32_ps(int4x32);
+      // weight
+      auto w = _mm_loadu_ps(s1 + v);
+      auto result = _mm_mul_ps(float4x32, w);
+      // scale back
+      result = _mm_mul_ps(result, scaler);
+      _mm_storeu_ps(d + v, result);
     }
     s0 += p0;
     s1 += p1;
@@ -229,6 +298,41 @@ void proc0_16_SSE2(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
+
+template<int bits_per_pixel>
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
+void proc0_uint16_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1, float* d,
+  const int p0, const int p1, const int /*offset_lsb*/)
+{
+  constexpr float scaler1 = 1.0f / (1 << (bits_per_pixel - 8)); // back to the 0.0 - 255.0 range
+  auto zero = _mm_setzero_si128();
+  auto scaler = _mm_set_ps1(scaler1);
+  for (int u = 0; u < p1; ++u)
+  {
+    for (int v = 0; v < p1; v += 4)
+    {
+      // 4x16
+      auto src = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(s0 + v * sizeof(uint16_t)));
+      //4x16->4x32
+      auto int4x32 = _mm_unpacklo_epi16(src, zero);
+      // int->float
+      auto float4x32 = _mm_cvtepi32_ps(int4x32);
+      // weight
+      auto w = _mm_loadu_ps(s1 + v);
+      auto result = _mm_mul_ps(float4x32, w);
+      // scale back
+      result = _mm_mul_ps(result, scaler);
+      _mm_storeu_ps(d + v, result);
+    }
+    s0 += p0;
+    s1 += p1;
+    d += p1;
+  }
+}
+
+// full float domain, no hbd problem here
 void proc1_C(const float* s0, const float* s1, float* d,
   const int p0, const int p1)
 {
@@ -338,7 +442,7 @@ void func_0(void* ps)
     const bool tcheck = (nthreads > 1 && min(y - sheight, eheight - y) < sbsize) ? true : false;
     for (int x = 0; x <= width - sbsize; x += inc)
     {
-      pss->proc0(srcp + x, hw, dftr, src_pitch, sbsize, offset_lsb);
+      pss->proc0(srcp + x * pss->pixelsize, hw, dftr, src_pitch, sbsize, offset_lsb); // fixme more optim
       pss->fftwf_execute_dft_r2c(pss->ft, dftr, dftc);
       if (zmean)
         pss->removeMean((float*)dftc, (float*)dftgc, ccnt, (float*)dftc2);
@@ -410,6 +514,7 @@ void func_1(void* ps)
   const float f0beta = pss->f0beta;
   const bool uf0b = fabsf(f0beta - 1.0f) < 0.00005f ? false : true;
   const unsigned char** pfplut = pss->pfplut;
+  // fixme hbd: frame pointers here, no hbd special here, ptr is uint8_t* and using pitch only
   for (int i = 0; i < fc->size; ++i)
     pfplut[i] = fc->frames[fc->getCachePos(i)]->ppf->GetPtr(b) + src_pitch * sheight;
   const int inc = (pss->type & 1) ? sbsize - sosize : 1;
@@ -420,8 +525,11 @@ void func_1(void* ps)
     for (int x = 0; x <= width - sbsize; x += inc)
     {
       for (int z = 0; z <= stopz; ++z)
-        pss->proc0(pfplut[z] + x, hw + sbsize * sbsize * z,
+      {
+        // fixme hbd: integer to float conversion here
+        pss->proc0(pfplut[z] + x * pss->pixelsize, hw + sbsize * sbsize * z, // fixme: more optim
           dftr + sbsize * sbsize * z, src_pitch, sbsize, offset_lsb);
+      }
       pss->fftwf_execute_dft_r2c(pss->ft, dftr, dftc);
       if (zmean)
         pss->removeMean((float*)dftc, (float*)dftgc, ccnt, (float*)dftc2);
@@ -453,6 +561,7 @@ void func_1(void* ps)
         {
           for (int z = 0; z <= stopz; ++z)
           {
+            // no hbd fixme, still in float domain
             pss->proc1(dftr + z * barea, hw + z * barea,
               ebp[z * 3 + b] + y * width + x, sbsize, width);
           }
@@ -484,7 +593,35 @@ void func_1(void* ps)
   }
 }
 
-void intcast_C(const float* p, unsigned char* dst, const int src_height,
+template<int bits_per_pixel>
+void intcast_float_to_uint16_t_C(const float* p, unsigned char* dst, const int src_height,
+  const int src_width, const int dst_pitch, const int width)
+{
+  constexpr float factor = (float)(1 << (bits_per_pixel - 8));
+  constexpr int max_pixel_value = (1 << bits_per_pixel) - 1;
+  for (int y = 0; y < src_height; ++y)
+  {
+    for (int x = 0; x < src_width; ++x)
+      reinterpret_cast<uint16_t *>(dst)[x] = min(max((int)(p[x] * factor + 0.5f), 0), max_pixel_value);
+    p += width;
+    dst += dst_pitch;
+  }
+}
+
+void intcast_float_to_float_C(const float* p, unsigned char* dst, const int src_height,
+  const int src_width, const int dst_pitch, const int width)
+{
+  constexpr float factor = 1 / 255.0f;
+  for (int y = 0; y < src_height; ++y)
+  {
+    for (int x = 0; x < src_width; ++x)
+      reinterpret_cast<float *>(dst)[x] = p[x] * factor; // no clamp
+    p += width;
+    dst += dst_pitch;
+  }
+}
+
+void intcast_float_to_uint8_t_C(const float* p, unsigned char* dst, const int src_height,
   const int src_width, const int dst_pitch, const int width)
 {
   for (int y = 0; y < src_height; ++y)
@@ -496,17 +633,18 @@ void intcast_C(const float* p, unsigned char* dst, const int src_height,
   }
 }
 
-void intcast_C_16_bits(const float* p, unsigned char* dst, unsigned char* dst_lsb, const int src_height,
+// ex-intcast_C_16_bits
+void intcast_float_to_stacked16_C(const float* p, unsigned char* dst, unsigned char* dst_lsb, const int src_height,
   const int src_width, const int dst_pitch, const int width)
 {
-  const int		saved_rounding_mode = ::_controlfp(RC_NEAR, _MCW_RC);
+  //const int saved_rounding_mode = ::_controlfp(RC_NEAR, _MCW_RC);
 
   for (int y = 0; y < src_height; ++y)
   {
     for (int x = 0; x < src_width; ++x)
     {
-      const float		vf = p[x] * 256;
-      int				v;
+      const float vf = p[x] * 256;
+      int v;
       v = int(vf + 0.5f);
       v = min(max(v, 0), 65535);
       dst[x] = static_cast <unsigned char> (v >> 8);
@@ -517,7 +655,7 @@ void intcast_C_16_bits(const float* p, unsigned char* dst, unsigned char* dst_ls
     dst_lsb += dst_pitch;
   }
 
-  ::_controlfp(saved_rounding_mode, _MCW_RC);
+  //::_controlfp(saved_rounding_mode, _MCW_RC);
 }
 
 void dither_C(const float* p, unsigned char* dst, const int src_height,
@@ -561,7 +699,7 @@ void dither_C(const float* p, unsigned char* dst, const int src_height,
 #if defined(GCC) || defined(CLANG)
 __attribute__((__target__("sse2")))
 #endif
-void intcast_SSE2_8(const float* p, unsigned char* dst, const int src_height,
+void intcast_float_to_uint8_t_SSE2_8pixels(const float* p, unsigned char* dst, const int src_height,
   const int src_width, const int dst_pitch, const int width)
 {
   auto sse2_05 = _mm_set_ps1(0.5f);
@@ -594,7 +732,11 @@ PVideoFrame dfttest::GetFrame_S(int n, IScriptEnvironment* env)
 {
   PVideoFrame src = child->GetFrame(mapn(n), env);
   nlf->pf->copyFrom(src, vi_src);
-  copyPad(nlf->pf, nlf->ppf, env);
+  switch (pixelsize) {
+  case 1: copyPad<uint8_t>(nlf->pf, nlf->ppf, env); break;
+  case 2: copyPad<uint16_t>(nlf->pf, nlf->ppf, env); break;
+  case 4: copyPad<float>(nlf->pf, nlf->ppf, env); break;
+  }
   for (int b = 0; b < 3; ++b)
   {
     if ((b == 0 && !Y) || (b == 1 && !U) || (b == 2 && !V))
@@ -639,7 +781,12 @@ PVideoFrame dfttest::GetFrame_T(int n, IScriptEnvironment* env)
       {
         PVideoFrame src = child->GetFrame(mapn(i), env);
         nl->pf->copyFrom(src, vi_src);
-        copyPad(nl->pf, nl->ppf, env);
+
+        switch (pixelsize) {
+        case 1: copyPad<uint8_t>(nl->pf, nl->ppf, env); break;
+        case 2: copyPad<uint16_t>(nl->pf, nl->ppf, env); break;
+        case 4: copyPad<float>(nl->pf, nl->ppf, env); break;
+        }
         nl->setFNum(i);
       }
     }
@@ -703,7 +850,11 @@ PVideoFrame dfttest::GetFrame_T(int n, IScriptEnvironment* env)
         {
           PVideoFrame src = child->GetFrame(mapn(i), env);
           nl->pf->copyFrom(src, vi_src);
-          copyPad(nl->pf, nl->ppf, env);
+          switch (pixelsize) {
+          case 1: copyPad<uint8_t>(nl->pf, nl->ppf, env); break;
+          case 2: copyPad<uint16_t>(nl->pf, nl->ppf, env); break;
+          case 4: copyPad<float>(nl->pf, nl->ppf, env); break;
+          }
           nl->setFNum(i);
         }
       }
@@ -780,7 +931,7 @@ void dfttest::conv_result_plane_to_int(int width, int height, int b, int ebuff_i
   {
     assert(dstPF_lsb != 0);
     unsigned char* dst_lsb_p = dstPF_lsb->GetPtr(b);
-    intcast_C_16_bits(
+    intcast_float_to_stacked16_C(
       ebp,
       dstp, dst_lsb_p,
       src_height, src_width,
@@ -789,12 +940,24 @@ void dfttest::conv_result_plane_to_int(int width, int height, int b, int ebuff_i
   }
   else
   {
-    if (dither)
-      dither_C(ebp, dstp, src_height, src_width, dst_pitch, width, dither);
-    else if (!(src_width & 7) && (((cpuflags & CPUF_SSE2) && opt == 0) || opt == 3 || opt == 2))
-      intcast_SSE2_8(ebp, dstp, src_height, src_width, dst_pitch, width);
-    else
-      intcast_C(ebp, dstp, src_height, src_width, dst_pitch, width);
+    if (bits_per_pixel == 8) {
+      if (dither)
+        dither_C(ebp, dstp, src_height, src_width, dst_pitch, width, dither);
+      else if (!(src_width & 7) && (((cpuflags & CPUF_SSE2) && opt == 0) || opt == 3 || opt == 2))
+        intcast_float_to_uint8_t_SSE2_8pixels(ebp, dstp, src_height, src_width, dst_pitch, width);
+      else
+        intcast_float_to_uint8_t_C(ebp, dstp, src_height, src_width, dst_pitch, width);
+    }
+    else {
+      switch (bits_per_pixel) {
+      case 10: intcast_float_to_uint16_t_C<10>(ebp, dstp, src_height, src_width, dst_pitch, width); break;
+      case 12: intcast_float_to_uint16_t_C<12>(ebp, dstp, src_height, src_width, dst_pitch, width); break;
+      case 14: intcast_float_to_uint16_t_C<14>(ebp, dstp, src_height, src_width, dst_pitch, width); break;
+      case 16: intcast_float_to_uint16_t_C<16>(ebp, dstp, src_height, src_width, dst_pitch, width); break;
+      default: intcast_float_to_float_C(ebp, dstp, src_height, src_width, dst_pitch, width); break; // intcast_float_to_float haha
+      // 32 bit float
+      }
+    }
   }
 }
 
@@ -1136,6 +1299,7 @@ void filter_6_SSE(float* dftc, const float* sigmas, const int ccnt,
   }
 }
 
+template<typename pixel_t>
 void dfttest::copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* env)
 {
   for (int b = 0; b < 3; ++b)
@@ -1143,23 +1307,27 @@ void dfttest::copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* en
     if ((b == 0 && !Y) || (b == 1 && !U) || (b == 2 && !V))
       continue;
 
-    for (int part = 0; part < lsb_in_hmul; ++part)
+    const int		src_width = src->GetWidth(b);
+    const int		src_height = src->GetHeight(b) / lsb_in_hmul;
+    const int		src_pitch = src->GetPitch(b);
+    const int		dst_width = dst->GetWidth(b);
+    const int		dst_height = dst->GetHeight(b) / lsb_in_hmul;
+    const int		dst_pitch = dst->GetPitch(b);
+    const int		offy = (dst_height - src_height) >> 1;
+    const int		offx = (dst_width - src_width) >> 1;
+
+    const unsigned char* srcp_base0 = src->GetPtr(b);
+    unsigned char* dstp_base0 = dst->GetPtr(b);
+
+    for (int part = 0; part < lsb_in_hmul; ++part) // single plane or msb, lsb
     {
-      const int		src_width = src->GetWidth(b);
-      const int		src_height = src->GetHeight(b) / lsb_in_hmul;
-      const int		src_pitch = src->GetPitch(b);
-      const int		dst_width = dst->GetWidth(b);
-      const int		dst_height = dst->GetHeight(b) / lsb_in_hmul;
-      const int		dst_pitch = dst->GetPitch(b);
-      const int		offy = (dst_height - src_height) >> 1;
-      const int		offx = (dst_width - src_width) >> 1;
-      const unsigned char* srcp_base = src->GetPtr(b) + src_pitch * src_height * part;
-      unsigned char* dstp_base = dst->GetPtr(b) + dst_pitch * dst_height * part;
-      unsigned char* dstp = dstp_base + dst_pitch * offy;
+      const unsigned char* srcp_base = srcp_base0 + src_pitch * src_height * part;
+      unsigned char* dstp_base = dstp_base0 + dst_pitch * dst_height * part;
+      pixel_t* dstp = reinterpret_cast<pixel_t *>(dstp_base + dst_pitch * offy);
       env->BitBlt(
-        dstp + offx, dst_pitch,
+        (BYTE *)(dstp + offx), dst_pitch,
         srcp_base, src_pitch,
-        src_width, src_height
+        src_width * sizeof(pixel_t), src_height
         );
       for (int y = offy; y < src_height + offy; ++y)
       {
@@ -1173,7 +1341,7 @@ void dfttest::copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* en
         {
           dstp[x] = dstp[w];
         }
-        dstp += dst_pitch;
+        dstp += dst_pitch / sizeof(pixel_t);
       }
       int w = offy * 2;
       for (int y = 0; y < offy; ++y, --w)
@@ -1181,7 +1349,7 @@ void dfttest::copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* en
         env->BitBlt(
           dstp_base + dst_pitch * y, dst_pitch,
           dstp_base + dst_pitch * w, dst_pitch,
-          dst_width, 1
+          dst_width * sizeof(pixel_t), 1
           );
       }
       w = offy + src_height - 2;
@@ -1190,7 +1358,7 @@ void dfttest::copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* en
         env->BitBlt(
           dstp_base + dst_pitch * y, dst_pitch,
           dstp_base + dst_pitch * w, dst_pitch,
-          dst_width, 1
+          dst_width * sizeof(pixel_t), 1
           );
       }
     }
@@ -1318,10 +1486,22 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
   vi_src = vi;
   vi_byte = vi;
 
+  bits_per_pixel = vi.BitsPerComponent();
+  pixelsize = vi.ComponentSize();
+
   proc_height = vi.height;
   lsb_in_hmul = 1;
+  if (lsb_out_flag)
+  {
+    if (bits_per_pixel != 8)
+      env->ThrowError("dfttest: lsb_out can be set only for 8 bit clips!");
+  }
+
   if (lsb_in_flag)
   {
+    if(bits_per_pixel != 8)
+      env->ThrowError("dfttest: lsb_in can be set only for 8 bit clips!");
+
     if ((proc_height & 1) != 0)
     {
       env->ThrowError("dfttest:  actual clip height must be even!");
@@ -1332,8 +1512,8 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     lsb_in_hmul = 2;
   }
 
-  if (!vi.IsYUY2() && !(vi.IsYUV() && vi.IsPlanar() && !vi.IsY8()))
-    env->ThrowError("dfttest:  only YUV and YUY2 input supported!");
+  if (!vi.IsYUY2() && !vi.IsPlanar() && !vi.IsY())
+    env->ThrowError("dfttest:  only Y, planar RGB, YUV and YUY2 input supported!");
   if (ftype < 0 || ftype > 4)
     env->ThrowError("dfttest:  ftype must be set to 0, 1, 2, 3, or 4!");
   if (tbsize < 1)
@@ -1408,26 +1588,46 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
   bvolume = barea * tbsize;
   norm = 1.0f / float(bvolume);
   ccnt = ((sbsize >> 1) + 1) * sbsize * tbsize;
-  const int ssxuv = vi.GetPlaneWidthSubsampling(PLANAR_U);
-  const int ssyuv = vi.GetPlaneHeightSubsampling(PLANAR_U);
+
+  const bool grey = vi.IsY();
+  int ssxuv;
+  int ssyuv;
+  if (vi.IsY() || vi.IsRGB()) {
+    ssxuv = 0;
+    ssyuv = 0;
+  }
+  else {
+    ssxuv = vi.GetPlaneWidthSubsampling(PLANAR_U);
+    ssyuv = vi.GetPlaneHeightSubsampling(PLANAR_U);
+  }
+
   if (smode == 0)
   {
     const int ae = (sbsize >> 1) << 1;
+    // luma
     noxl = vi.width + ae;
     noyl = proc_height + ae;
-    noxc = (vi.width >> ssxuv) + ae;
-    noyc = (proc_height >> ssyuv) + ae;
+    // chroma
+    noxc = grey ? 0 : (vi.width >> ssxuv) + ae;
+    noyc = grey ? 0 : (proc_height >> ssyuv) + ae;
   }
   else
   {
     const int ae = max(sbsize - sosize, sosize) * 2;
+    // luma
     noxl = vi.width + EXTRA(vi.width, sbsize) + ae;
     noyl = proc_height + EXTRA(proc_height, sbsize) + ae;
-    noxc = (vi.width >> ssxuv) + EXTRA(vi.width >> ssxuv, sbsize) + ae;
-    noyc = (proc_height >> ssyuv) + EXTRA(proc_height >> ssyuv, sbsize) + ae;
+    // chroma
+    noxc = grey ? 0 : (vi.width >> ssxuv) + EXTRA(vi.width >> ssxuv, sbsize) + ae;
+    noyc = grey ? 0 : (proc_height >> ssyuv) + EXTRA(proc_height >> ssyuv, sbsize) + ae;
   }
   PlanarFrame* padPF = new PlanarFrame();
-  padPF->createPlanar(noyl * lsb_in_hmul, noyc * lsb_in_hmul, noxl, noxc, false, false, 1, 8); // DJATOM: line updated with hardcoded defaults. Now it works with 8-bit frame using updated PlanarFrame
+  padPF->createPlanar(noyl * lsb_in_hmul, noyc * lsb_in_hmul, noxl, noxc, 
+    vi.IsPlanarRGB() || vi.IsPlanarRGBA(), 
+    vi.NumComponents()==4, 
+    pixelsize, 
+    bits_per_pixel);
+
   if (tbsize > 1)
     fc = new nlCache(tbsize, padPF, vi_src);
   else
@@ -1618,22 +1818,52 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
       }
     }
 
+    pssInfo[i]->pixelsize = pixelsize;
+
+    // x bits to float domain conversion functions: proc0
+    // C defaults, lsb_in_flag case will be overridden later
+    switch (bits_per_pixel)
+    {
+    case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_C; break;
+    case 10: pssInfo[i]->proc0 = proc0_uint16_to_float_C<10>; break;
+    case 12: pssInfo[i]->proc0 = proc0_uint16_to_float_C<12>; break;
+    case 14: pssInfo[i]->proc0 = proc0_uint16_to_float_C<14>; break;
+    case 16: pssInfo[i]->proc0 = proc0_uint16_to_float_C<16>; break;
+    case 32: pssInfo[i]->proc0 = proc0_float_to_float_C<false>; break; // fixme: do we need chroma moving back to 0..255 range?
+    }
+    pssInfo[i]->proc1 = proc1_C;
+
     if (((env->GetCPUFlags() & CPUF_AVX) && opt == 0) || opt == 3)
     {
-      if (!(sbsize & 7))
+      if (!(sbsize & 3)) // mod4
       {
-        pssInfo[i]->proc0 = proc0_SSE2_8;
-        pssInfo[i]->proc1 = proc1_SSE_8;
-      }
-      else if (!(sbsize & 3))
-      {
-        pssInfo[i]->proc0 = proc0_SSE2_4;
+        switch (bits_per_pixel)
+        {
+        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_4pixels; break;
+        case 10: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<10>; break;
+        case 12: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<12>; break;
+        case 14: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<14>; break;
+        case 16: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<16>; break;
+        case 32: // no special
+          break;
+        }
         pssInfo[i]->proc1 = proc1_SSE_4;
       }
-      else
+      if (!(sbsize & 7)) // mod8
       {
-        pssInfo[i]->proc0 = proc0_C;
-        pssInfo[i]->proc1 = proc1_C;
+        // further specialization
+        switch (bits_per_pixel)
+        {
+        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_8pixels; break;
+        case 10:
+        case 12:
+        case 14:
+        case 16:
+        case 32: 
+          /* no special */ 
+          break;
+        }
+        pssInfo[i]->proc1 = proc1_SSE_8;
       }
       pssInfo[i]->removeMean = removeMean_AVX;
       pssInfo[i]->addMean = addMean_AVX;
@@ -1653,20 +1883,35 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     }
     else if (((env->GetCPUFlags() & CPUF_SSE2) && opt == 0) || opt == 2)
     {
-      if (!(sbsize & 7))
+      if (!(sbsize & 3)) // mod4
       {
-        pssInfo[i]->proc0 = proc0_SSE2_8;
-        pssInfo[i]->proc1 = proc1_SSE_8;
-      }
-      else if (!(sbsize & 3))
-      {
-        pssInfo[i]->proc0 = proc0_SSE2_4;
+        switch (bits_per_pixel)
+        {
+        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_4pixels; break;
+        case 10: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<10>; break;
+        case 12: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<12>; break;
+        case 14: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<14>; break;
+        case 16: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<16>; break;
+        case 32: /* no special */
+          break;
+        }
         pssInfo[i]->proc1 = proc1_SSE_4;
       }
-      else
+      if (!(sbsize & 7)) // mod8
       {
-        pssInfo[i]->proc0 = proc0_C;
-        pssInfo[i]->proc1 = proc1_C;
+        // further specialization
+        switch (bits_per_pixel)
+        {
+        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_8pixels; break;
+        case 10:
+        case 12:
+        case 14:
+        case 16:
+        case 32:
+          /* no special */
+          break;
+        }
+        pssInfo[i]->proc1 = proc1_SSE_8;
       }
       pssInfo[i]->removeMean = removeMean_SSE;
       pssInfo[i]->addMean = addMean_SSE;
@@ -1686,8 +1931,8 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     }
     else
     {
-      pssInfo[i]->proc0 = proc0_C;
-      pssInfo[i]->proc1 = proc1_C;
+      // no SIMD, proc0 and proc1 already filled with defaults
+
       pssInfo[i]->removeMean = removeMean_C;
       pssInfo[i]->addMean = addMean_C;
       if (ftype == 0)
@@ -1706,13 +1951,14 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     }
     if (lsb_in_flag)
     {
+      // override converter
       if (((env->GetCPUFlags() & CPUF_SSE2) && opt == 0) || opt >= 2)
       {
-        pssInfo[i]->proc0 = proc0_16_SSE2;
+        pssInfo[i]->proc0 = proc0_stacked16_to_float_SSE2_4pixels;
       }
       else
       {
-        pssInfo[i]->proc0 = proc0_16_C;
+        pssInfo[i]->proc0 = proc0_stacked16_to_float_C;
       }
     }
     pssInfo[i]->jobFinished = CreateEvent(NULL, TRUE, TRUE, NULL);
@@ -1890,7 +2136,7 @@ void dfttest::getNoiseSpectrum(const char* fname, const char* nstring,
       PVideoFrame src = child->GetFrame(npts[ct].fn + z, env);
       prf->copyFrom(src, vi_src);
       const int pitch = prf->GetPitch(npts[ct].b);
-      const unsigned char* srcp = prf->GetPtr(npts[ct].b) + npts[ct].y * pitch + npts[ct].x;
+      const unsigned char* srcp = prf->GetPtr(npts[ct].b) + npts[ct].y * pitch + npts[ct].x * vi.ComponentSize(); // fixme more optim.
       const int offset_lsb = pss->ofs_lsb[npts[ct].b];
       pss->proc0(srcp, hw2 + sbsize * sbsize * z, dftr + sbsize * sbsize * z, pitch, sbsize, offset_lsb);
     }
@@ -2293,8 +2539,9 @@ dfttest::~dfttest()
 
 AVSValue __cdecl Create_dfttest(AVSValue args, void* user_data, IScriptEnvironment* env)
 {
-  return new dfttest(args[0].AsClip(), args[1].AsBool(true), args[2].AsBool(true),
-    args[3].AsBool(true), args[4].AsInt(0), float(args[5].AsFloat(16.0)), float(args[6].AsFloat(16.0)),
+  const bool grey = args[0].AsClip()->GetVideoInfo().IsY();
+  return new dfttest(args[0].AsClip(), args[1].AsBool(true), args[2].AsBool(!grey),
+    args[3].AsBool(!grey), args[4].AsInt(0), float(args[5].AsFloat(16.0)), float(args[6].AsFloat(16.0)),
     float(args[7].AsFloat(0.0f)), float(args[8].AsFloat(500.0f)), args[9].AsInt(12), args[10].AsInt(1),
     args[11].AsInt(9), args[12].AsInt(5), args[13].AsInt(0), args[14].AsInt(0),
     args[15].AsInt(0), args[16].AsInt(7), args[17].AsFloat(2.5), args[18].AsFloat(2.5),

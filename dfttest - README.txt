@@ -1,9 +1,9 @@
 
-                                       dfttest v1.9.4.4
+                                       dfttest v1.9.5
                                        Original code by tritical
                                        16-bit modification by Firesledge
                                        Avs+ port by DJATOM
-                                       Other works by pinterf
+                                       High bit depth support and other works by pinterf
 
 Info:
 
@@ -582,104 +582,114 @@ Parameters:
 
 ---------------------------------------------------------------------------------------------------
 
-    Changes:
-    2020.03.23 v1.9.4.4 - pinterf 
-       - fix: make fft3w plans thread safe
-       - MSVC project to VS2019, add v142, v141_xp and ClangCl config.
-       - refresh avisynth headers
-       - source to C++17 strict conformance
-       - AVX option is always available
+Changes:
 
-    2018.10.14 v1.9.4.3 - DJATOM
-       - Fixed one nasty bug, causing crash on non-AVX CPUs.
+2020.03.23 v1.9.5
+  - Avisynth+ high bit depth support 10-32 bits (base version, needs more optimization)
+    new formats: planar RGB
+    Y (greyscale)
+  - Fix: minor image noise at stacked16 input (lsb_in = true)
+    proc0_16_SSE2 contained a bug: every 2nd pixel contains traces of the lsb part of pixels 4 positions to the right
+    Regression since 1.9.4
+  - source: no more external asm, YUY2 converters replaced with simd code
 
-    2017.09.04 - DJATOM
-       - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
-       - Compilation: silence #693 for Intel Compiler
+2020.03.23 v1.9.4.4 - pinterf 
+  - fix: make fft3w plans thread safe
+  - MSVC project to VS2019, add v142, v141_xp and ClangCl config.
+  - refresh avisynth headers
+  - source to C++17 strict conformance
+  - AVX option is always available
 
-    2017.08.14 - DJATOM
-       - x64 ready: ported almost all inline asm to intrinsics (dropped some SSE functions, we're in 2017 now).
-       - AddMean and RemoveMean got their AVX codepaths.
-       - PlanarFrame updated from JPSDR's NNEDI3 repo (x64 friendly, HBD ready).
-       - proc0_16 got SSE2 codepath (I can see noticeable speed-up against old version).
-       - opt parameter change: 2 - SSE/SSE2, 3 - SSE/SSE2/AVX codepath is used.
+2018.10.14 v1.9.4.3 - DJATOM
+  - Fixed one nasty bug, causing crash on non-AVX CPUs.
 
-   2013-08-04  v1.9.4
-       + Compatible the new Avisynth 2.6 colorspaces, excepted Y8.
+2017.09.04 - DJATOM
+  - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
+  - Compilation: silence #693 for Intel Compiler
 
-   2012-04-20  v1.9.3
-       - Does no longer issue a tbsize-related error with null-length clips.
+2017.08.14 - DJATOM
+  - x64 ready: ported almost all inline asm to intrinsics (dropped some SSE functions, we're in 2017 now).
+  - AddMean and RemoveMean got their AVX codepaths.
+  - PlanarFrame updated from JPSDR's NNEDI3 repo (x64 friendly, HBD ready).
+  - proc0_16 got SSE2 codepath (I can see noticeable speed-up against old version).
+  - opt parameter change: 2 - SSE/SSE2, 3 - SSE/SSE2/AVX codepath is used.
 
-   2012-03-23  v1.9.2
-       - The quiet parameter is not true by default.
+2013-08-04  v1.9.4
+  + Compatible the new Avisynth 2.6 colorspaces, excepted Y8.
 
-   2012-03-11  v1.9.1
-       - Fixed a stupid regression (from v1.8 mod16a) on the dither parameter.
+2012-04-20  v1.9.3
+  - Does no longer issue a tbsize-related error with null-length clips.
 
-   2011-11-28  v1.9
-       + Added the quiet parameter to deactivate the filter spectrum output.
+2012-03-23  v1.9.2
+  - The quiet parameter is not true by default.
 
-   2011-05-12  v1.8 mod16b
-       + Added the lsb_in parameter to input 16 bit data.
+2012-03-11  v1.9.1
+  - Fixed a stupid regression (from v1.8 mod16a) on the dither parameter.
 
-   2010-06-26  v1.8 mod16a
-       + Added the lsb parameter to output 16 bit data.
+2011-11-28  v1.9
+  + Added the quiet parameter to deactivate the filter spectrum output.
 
-   2010-06-22  v1.8
+2011-05-12  v1.8 mod16b
+  + Added the lsb_in parameter to input 16 bit data.
 
-       + added dither parameter and functionality
-       + attach date string to filter_spectrum.txt and noise_spectrum.txt output
-       + changed sstring handling and added option to function like fft3dfilter
+2010-06-26  v1.8 mod16a
+  + Added the lsb parameter to output 16 bit data.
 
-   2010-06-21  v1.7
+2010-06-22  v1.8
 
-       + added nstring/sstring/ssx/ssy/sst parameters and functionality
-       + allow space as delimiter in input files
-       - fixed missing emms in sse routine for f0beta != (1.0 or 0.5) and ftype=0
+  + added dither parameter and functionality
+  + attach date string to filter_spectrum.txt and noise_spectrum.txt output
+  + changed sstring handling and added option to function like fft3dfilter
 
-   2009-06-04  v1.6
+2010-06-21  v1.7
 
-       - fixed window normalization causing tmode=0 to always result in a rectangular
-            temporal window, and smode=0 to always result in a rectangular spatial
-            window.
-       - changed default for twin to 7
+  + added nstring/sstring/ssx/ssy/sst parameters and functionality
+  + allow space as delimiter in input files
+  - fixed missing emms in sse routine for f0beta != (1.0 or 0.5) and ftype=0
 
-   2009-04-11  v1.5
+2009-06-04  v1.6
 
-       + added f0beta in ftype=0
-       + added nfile parameter (noise power estimation)
-       + normalization of sigma/sigma2/pmin/pmax based on non-coherent power gain
+  - fixed window normalization causing tmode=0 to always result in a rectangular
+    temporal window, and smode=0 to always result in a rectangular spatial
+    window.
+  - changed default for twin to 7
 
-   2009-04-06  v1.4
+2009-04-11  v1.5
 
-       - fix threading issue that could result in corrupted output
+  + added f0beta in ftype=0
+  + added nfile parameter (noise power estimation)
+  + normalization of sigma/sigma2/pmin/pmax based on non-coherent power gain
 
-   2009-01-27  v1.3
+2009-04-06  v1.4
 
-       + more assembly optimizations
-       + tmode=1 caching (don't need to recalculate all involved temporal blocks on every frame)
-       - replicate temporal dimension at beginning/end, don't mirror
+  - fix threading issue that could result in corrupted output
 
-   2009-01-24  v1.2
+2009-01-27  v1.3
 
-       + added filter types 3/4 and corresponding parameters (sigma2,pmin,pmax,
-            sfile2,pminfile,pmaxfile)
-       + more asm optimizations
-       - fixed problem with global function pointers
-       - changed name of 'cfile' parameter to 'sfile'
-       - the value given for sigma is no longer squared on initialization
-       - sigma now defaults to 2.0
-       - tbsize now defaults to 5
+  + more assembly optimizations
+  + tmode=1 caching (don't need to recalculate all involved temporal blocks on every frame)
+  - replicate temporal dimension at beginning/end, don't mirror
 
-   2007-11-22  v1.1
+2009-01-24  v1.2
 
-       + more sse optimizations
-       - fixed a bug causing the bottom part of the frame to be incorrectly
-            processed with some sbsize/sosize combinations
+  + added filter types 3/4 and corresponding parameters (sigma2,pmin,pmax,
+    sfile2,pminfile,pmaxfile)
+  + more asm optimizations
+  - fixed problem with global function pointers
+  - changed name of 'cfile' parameter to 'sfile'
+  - the value given for sigma is no longer squared on initialization
+  - sigma now defaults to 2.0
+  - tbsize now defaults to 5
 
-   2007-11-21  v1.0
+2007-11-22  v1.1
 
-       - initial release
+  + more sse optimizations
+  - fixed a bug causing the bottom part of the frame to be incorrectly
+    processed with some sbsize/sosize combinations
+
+2007-11-21  v1.0
+
+  - initial release
 
 
 contact:  forum.doom9.org - tritical  or  kes25c@mizzou.edu

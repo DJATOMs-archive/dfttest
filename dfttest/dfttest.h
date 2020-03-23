@@ -1,5 +1,5 @@
 /*
-**                    dfttest v1.9.4.4 for Avisynth+
+**                    dfttest for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
@@ -88,16 +88,16 @@ void filter_3_SSE(float* dftc, const float* sigmas, const int ccnt,
 void filter_4_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
 
-void proc0_C(const unsigned char* s0, const float* s1, float* d,
+void proc0_uint8_to_float_C(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb);
-void proc0_SSE2_4(const unsigned char* s0, const float* s1, float* d,
+void proc0_uint8_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb);
-void proc0_SSE2_8(const unsigned char* s0, const float* s1, float* d,
+void proc0_uint8_to_float_SSE2_8pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb);
 
-void proc0_16_C(const unsigned char* s0, const float* s1, float* d,
+void proc0_stacked16_to_float_C(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb);
-void proc0_16_SSE2(const unsigned char* s0, const float* s1, float* d,
+void proc0_stacked16_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int offset_lsb);
 
 void proc1_C(const float* s0, const float* s1, float* d,
@@ -107,13 +107,13 @@ void proc1_SSE_4(const float* s0, const float* s1, float* d,
 void proc1_SSE_8(const float* s0, const float* s1, float* d,
   const int p0, const int p1);
 
-void intcast_C(const float* p, unsigned char* dst, const int src_height,
+void intcast_float_to_uint8_t_C(const float* p, unsigned char* dst, const int src_height,
   const int src_width, const int dst_pitch, const int width);
-void intcast_C_16_bits(const float* p, unsigned char* dst, unsigned char* dst_lsb, const int src_height,
+void intcast_float_to_stacked16_C(const float* p, unsigned char* dst, unsigned char* dst_lsb, const int src_height,
   const int src_width, const int dst_pitch, const int width);
 void dither_C(const float* p, unsigned char* dst, const int src_height,
   const int src_width, const int dst_pitch, const int width, const int mode);
-void intcast_SSE2_8(const float* p, unsigned char* dst, const int src_height,
+void intcast_float_to_uint8_t_SSE2_8pixels(const float* p, unsigned char* dst, const int src_height,
   const int src_width, const int dst_pitch, const int width);
 
 double getWinValue(double n, double size, int win, double beta);
@@ -144,7 +144,10 @@ public:
   int getCachePos(int n);
 };
 
+using proc0_t = void(const unsigned char*, const float*, float*, const int, const int, const int);
+
 struct PS_INFO {
+  int pixelsize;
   bool zmean;
   int showx, showy, showp;
   int ccnt, stopz, barea, pos;
@@ -164,8 +167,7 @@ struct PS_INFO {
   void (*addMean)(float*, const int, const float*);
   void (*filterCoeffs)(float*, const float*, const int, const float*,
     const float*, const float*);
-  void (*proc0)(const unsigned char*, const float*, float*, const int,
-    const int, const int);
+  proc0_t* proc0;
   void (*proc1)(const float*, const float*, float*, const int,
     const int);
   LPCRITICAL_SECTION csect;
@@ -175,6 +177,9 @@ struct PS_INFO {
 class dfttest : public GenericVideoFilter
 {
 private:
+  int bits_per_pixel;
+  int pixelsize;
+   
   bool Y, U, V, zmean, lsb_in_flag, lsb_out_flag, quiet_flag;
   int proc_height;	// Real processing height, not depending on the 8/16 bit stuff.
   int sbsize, smode, sosize, swin;
@@ -210,7 +215,10 @@ private:
   fftwf_execute_dft_r2c_proc fftwf_execute_dft_r2c;
   fftwf_execute_dft_c2r_proc fftwf_execute_dft_c2r;
   int mapn(int n);
+
+  template<typename pixel_t>
   void copyPad(PlanarFrame* src, PlanarFrame* dst, IScriptEnvironment* env);
+
   PVideoFrame GetFrame_S(int n, IScriptEnvironment* env);
   PVideoFrame GetFrame_T(int n, IScriptEnvironment* env);
   PVideoFrame build_output_frame(IScriptEnvironment* env);
