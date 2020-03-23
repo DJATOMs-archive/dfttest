@@ -1,9 +1,10 @@
 /*
-**                    dfttest v1.9.4.3 for Avisynth+
+**                    dfttest v1.9.4.4 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
 **   Copyright (C) 2007-2010 Kevin Stone, 2017 (C) DJATOM
+**             (C) 2019 pinterf
 **
 **   This program is free software; you can redistribute it and/or modify
 **   it under the terms of the GNU General Public License as published by

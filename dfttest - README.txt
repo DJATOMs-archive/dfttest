@@ -1,8 +1,9 @@
 
-                                       dfttest v1.9.4.1
+                                       dfttest v1.9.4.4
                                        Original code by tritical
                                        16-bit modification by Firesledge
                                        Avs+ port by DJATOM
+                                       Other works by pinterf
 
 Info:
 
@@ -581,7 +582,27 @@ Parameters:
 
 ---------------------------------------------------------------------------------------------------
 
-Changes:
+    Changes:
+    2020.03.23 v1.9.4.4 - pinterf 
+       - fix: make fft3w plans thread safe
+       - MSVC project to VS2019, add v142, v141_xp and ClangCl config.
+       - refresh avisynth headers
+       - source to C++17 strict conformance
+       - AVX option is always available
+
+    2018.10.14 v1.9.4.3 - DJATOM
+       - Fixed one nasty bug, causing crash on non-AVX CPUs.
+
+    2017.09.04 - DJATOM
+       - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
+       - Compilation: silence #693 for Intel Compiler
+
+    2017.08.14 - DJATOM
+       - x64 ready: ported almost all inline asm to intrinsics (dropped some SSE functions, we're in 2017 now).
+       - AddMean and RemoveMean got their AVX codepaths.
+       - PlanarFrame updated from JPSDR's NNEDI3 repo (x64 friendly, HBD ready).
+       - proc0_16 got SSE2 codepath (I can see noticeable speed-up against old version).
+       - opt parameter change: 2 - SSE/SSE2, 3 - SSE/SSE2/AVX codepath is used.
 
    2013-08-04  v1.9.4
        + Compatible the new Avisynth 2.6 colorspaces, excepted Y8.

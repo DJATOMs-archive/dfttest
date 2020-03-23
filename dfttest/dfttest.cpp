@@ -1,9 +1,10 @@
 /*
-**                    dfttest v1.9.4.3 for Avisynth+
+**                    dfttest v1.9.4.4 for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
 **   Copyright (C) 2007-2010 Kevin Stone, 2017 (C) DJATOM
+**             (C) 2020 pinterf
 **
 **   This program is free software; you can redistribute it and/or modify
 **   it under the terms of the GNU General Public License as published by
@@ -23,13 +24,17 @@
 /*
 Modifications:
 2020.03.23 - pinterf
-     - make fft3w plans thread safe
+   - fix: make fft3w plans thread safe
+   - MSVC project to VS2019, add v142, v141_xp and ClangCl config.
+   - refresh avisynth headers
+   - source to C++17 strict conformance
+   - AVX option is always available
 
 2018.10.14 - DJATOM
-     - Fixed one nasty bug, causing crash on non-AVX CPUs.
+   - Fixed one nasty bug, causing crash on non-AVX CPUs.
 
 2017.09.04 - DJATOM
-     - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
+   - Adaptive MT mode: MT_MULTI_INSTANCE for threads=1 and MT_SERIALIZED for > 1 internal
    - Compilation: silence #693 for Intel Compiler
 
 2017.08.14 - DJATOM
