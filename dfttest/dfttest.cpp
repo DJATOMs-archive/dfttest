@@ -558,6 +558,9 @@ void dither_C(const float* p, unsigned char* dst, const int src_height,
   free(dither);
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
 void intcast_SSE2_8(const float* p, unsigned char* dst, const int src_height,
   const int src_width, const int dst_pitch, const int width)
 {

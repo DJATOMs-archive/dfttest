@@ -490,6 +490,15 @@ namespace fmath {
 #endif
   }
 
+#ifdef __AVX2__
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("fma3,avx2")))
+#endif
+#else
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("sse2")))
+#endif
+#endif
   inline __m128d exp_pd(__m128d x)
   {
 #if 0 // faster on Haswell
@@ -626,6 +635,15 @@ namespace fmath {
     }
   }
 
+#ifdef __AVX2__
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("fma3,avx2")))
+#endif
+#else
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("sse2")))
+#endif
+#endif
 #ifdef FMATH_USE_XBYAK
   inline __m128 exp_psC(__m128 x)
 #else
@@ -751,6 +769,15 @@ namespace fmath {
     return f;
   }
 
+#ifdef __AVX2__
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("fma3,avx2")))
+#endif
+#else
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("sse2")))
+#endif
+#endif
   inline __m128 log_ps(__m128 x)
   {
     using namespace local;
