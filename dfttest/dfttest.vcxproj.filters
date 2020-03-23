@@ -56,12 +56,4 @@
       <Filter>Resource Files</Filter>
     </ResourceCompile>
   </ItemGroup>
-  <ItemGroup>
-    <MASM Include="PlanarFrame_asm_x64.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
-    <MASM Include="PlanarFrame_asm.asm">
-      <Filter>Source Files</Filter>
-    </MASM>
-  </ItemGroup>
 </Project>

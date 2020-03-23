@@ -66,6 +66,8 @@ private:
   bool copyInternalPlaneTo16Round(PlanarFrame& frame, uint8_t plane);
   void conv422toYUY2(uint8_t* py, uint8_t* pu, uint8_t* pv, uint8_t* dst, int pitch1Y, int pitch1UV, int pitch2,
     int width, int height);
+  void conv422toYUY2_SSE2(uint8_t* py, uint8_t* pu, uint8_t* pv, uint8_t* dst, int pitch1Y, int pitch1UV, int pitch2,
+    int width, int height);
   void conv444toRGB24(uint8_t* py, uint8_t* pu, uint8_t* pv, uint8_t* dst, int pitch1Y, int pitch1UV, int pitch2,
     int width, int height);
   void AddLsb(unsigned char* dstp, int dst_pitch, const unsigned char* srcp,
@@ -101,6 +103,8 @@ public:
   inline void BitBlt(uint8_t* dstp, int dst_pitch, const uint8_t* srcp, int src_pitch, int row_size, int height);
   PlanarFrame& operator=(PlanarFrame& ob2);
   void convYUY2to422(const uint8_t* src, uint8_t* py, uint8_t* pu, uint8_t* pv, int pitch1, int pitch2Y, int pitch2UV,
+    int width, int height);
+  void convYUY2to422_SSE2(const uint8_t* src, uint8_t* py, uint8_t* pu, uint8_t* pv, int pitch1, int pitch2Y, int pitch2UV,
     int width, int height);
   void convRGB24to444(const uint8_t* src, uint8_t* py, uint8_t* pu, uint8_t* pv, int pitch1, int pitch2Y, int pitch2UV,
     int width, int height);
