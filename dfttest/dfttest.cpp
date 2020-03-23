@@ -1598,7 +1598,6 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
       }
     }
 
-#ifdef AVX_BUILD
     if (((env->GetCPUFlags() & CPUF_AVX) && opt == 0) || opt == 3)
     {
       if (!(sbsize & 7))
@@ -1633,9 +1632,6 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
       else pssInfo[i]->filterCoeffs = filter_4_SSE;
     }
     else if (((env->GetCPUFlags() & CPUF_SSE2) && opt == 0) || opt == 2)
-#else
-    if (((env->GetCPUFlags() & CPUF_SSE2) && opt == 0) || opt == 2)
-#endif
     {
       if (!(sbsize & 7))
       {

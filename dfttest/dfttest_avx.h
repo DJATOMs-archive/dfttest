@@ -20,9 +20,7 @@
 **   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 */
 
-#ifdef AVX_BUILD
 #include <immintrin.h>
 
 void removeMean_AVX(float* dftc, const float* dftgc, const int ccnt, float* dftc2);
 void addMean_AVX(float* dftc, const int ccnt, const float* dftc2);
-#endif
