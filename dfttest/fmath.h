@@ -137,7 +137,7 @@ namespace fmath {
         }
 
         for (int i = 0; i < n; i++) {
-          float y = pow(2.0f, (float)i / n);
+          float y = powf(2.0f, (float)i / n);
           fi fi;
           fi.f = y;
           tbl[i] = fi.i & mask(23);

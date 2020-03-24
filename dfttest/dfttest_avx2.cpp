@@ -33,7 +33,6 @@ __attribute__((__target__("fma,avx2")))
 void proc0_uint8_to_float_AVX2_8pixels(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
-  auto zero = _mm_setzero_si128();
   for (int u = 0; u < p1; ++u)
   {
     for (int v = 0; v < p1; v += 8)

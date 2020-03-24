@@ -439,7 +439,6 @@ __attribute__((__target__("sse2")))
 void proc1_SSE_4(const float* s0, const float* s1, float* d,
   const int p0, const int p1)
 {
-  auto zero = _mm_setzero_si128();
   for (int u = 0; u < p0; ++u)
   {
     for (int v = 0; v < p0; v += 4)
@@ -1120,7 +1119,6 @@ void removeMean_SSE(float* dftc, const float* dftgc, const int ccnt, float* dftc
   {
     auto dftc_loop = _mm_loadu_ps(dftc + h);
     auto dftgc_loop = _mm_loadu_ps(dftgc + h);
-    auto dftc2_loop = _mm_loadu_ps(dftc2 + h);
     auto dftc2_result = _mm_mul_ps(gf_asm, dftgc_loop);
     auto dftc_result = _mm_sub_ps(dftc_loop, dftc2_result);
     _mm_storeu_ps(dftc2 + h, dftc2_result);
@@ -1588,14 +1586,14 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
   const char* _ssx, const char* _ssy, const char* _sst, const int _dither,
   bool _lsb_in_flag, bool _lsb_out_flag, bool _quiet_flag,
   IScriptEnvironment* env)
-  : GenericVideoFilter(_child), Y(_Y), U(_U), V(_V),
+  : GenericVideoFilter(_child), Y(_Y), U(_U), V(_V), zmean(_zmean),
+  lsb_in_flag(_lsb_in_flag), lsb_out_flag(_lsb_out_flag), quiet_flag(_quiet_flag),
   ftype(_ftype), sigma(_sigma), sigma2(_sigma2), pmin(_pmin), pmax(_pmax),
-  sbsize(_sbsize), smode(_smode), sosize(_sosize), tbsize(_tbsize), tmode(_tmode),
-  tosize(_tosize), swin(_swin), twin(_twin), sbeta(_sbeta), tbeta(_tbeta),
-  zmean(_zmean), sfile(_sfile), sfile2(_sfile2), pminfile(_pminfile),
-  pmaxfile(_pmaxfile), opt(_opt), threads(_threads), dither(_dither),
-  lsb_in_flag(_lsb_in_flag), lsb_out_flag(_lsb_out_flag),
-  quiet_flag(_quiet_flag)
+  sbsize(_sbsize), smode(_smode), sosize(_sosize), swin(_swin),
+  tbsize(_tbsize), tmode(_tmode), tosize(_tosize), twin(_twin),
+  opt(_opt), threads(_threads), dither(_dither),
+  sbeta(_sbeta), tbeta(_tbeta),
+  sfile(_sfile), sfile2(_sfile2), pminfile(_pminfile), pmaxfile(_pmaxfile)
 {
   ft = fti = ftg = NULL;
   ebuff = NULL;
@@ -1779,7 +1777,6 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     assert(dstPF_lsb->GetPitch(PLANAR_U) == dstPF->GetPitch(PLANAR_U));
     assert(dstPF_lsb->GetPitch(PLANAR_V) == dstPF->GetPitch(PLANAR_V));
   }
-  int w = 0;
   hw = (float*)_aligned_malloc(bvolume * sizeof(float), 16);
   createWindow(hw, tmode, tbsize, tosize, twin, tbeta, smode, sbsize, sosize, swin, sbeta);
   float* dftgr = (float*)_aligned_malloc(bvolume * sizeof(float), 16);

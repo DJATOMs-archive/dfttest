@@ -189,15 +189,19 @@ private:
   int pixelsize;
   bool Y, U, V, zmean, lsb_in_flag, lsb_out_flag, quiet_flag;
   int proc_height; // Real processing height, not depending on the 8/16 bit stacked16 stuff.
+  int ftype;
+  float sigma, sigma2;
+  float pmin, pmax;
   int sbsize, smode, sosize, swin;
   int tbsize, tmode, tosize, twin;
+  int opt, threads, dither;
   int noxl, noyl, noxc, noyc;
-  int barea, bvolume, ftype, dither;
-  int ccnt, threads, opt, ebframe;
+  int barea, bvolume;
+  int ccnt, ebframe;
   int lsb_in_hmul;
   double sbeta, tbeta;
-  float** ebuff, * hw, sigma, sigma2;
-  float norm, * sigmas, pmin, pmax;
+  float** ebuff, * hw;
+  float norm, * sigmas;
   float* pmins, * pmaxs, * sigmas2;
   fftwf_plan ft, fti, ftg;
   fftwf_complex* dftgc;
@@ -255,7 +259,7 @@ public:
     bool _lsb_in_flag, bool _lsb_out_flag, bool _quiet_flag,
     IScriptEnvironment* env);
   ~dfttest();
-  int __stdcall SetCacheHints(int cachehints, int frame_range)
+  int __stdcall SetCacheHints(int cachehints, int frame_range) override
   {
     switch (cachehints)
     {
