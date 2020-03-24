@@ -23,6 +23,14 @@
 
 /*
 Modifications:
+
+2020.03.24 v1.9.6
+- parameter opt=4 for avx2
+- avx2 for mod-8 sbsize cases
+- fix: a very broken filter_3_sse
+- fix: filter_6_sse: number limited with 1e-15 instead of 0
+- filter_6_sse: replacing (rsqrt+rcp) with direct sqrt
+
 2020.03.23 v1.9.5
 - Avisynth+ high bit depth support 10-32 bits (base version, needs more optimization)
   new formats: planar RGB
@@ -89,6 +97,8 @@ Modifications:
 
 #include "dfttest.h"
 #include "dfttest_avx.h"
+#include "dfttest_avx2.h"
+#include "smmintrin.h"
 #include <cassert>
 #include <mutex>
 
@@ -120,6 +130,14 @@ unsigned __stdcall threadPool(void* ps)
   }
 }
 
+/***************************************
+*
+* source tofloat
+* uint8_t 8 bits
+* uint16_t 10-16 bits
+* float 32 bits
+*
+****************************************/
 void proc0_uint8_to_float_C(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
@@ -148,7 +166,7 @@ void proc0_uint16_to_float_C(const unsigned char* s0, const float* s1, float* d,
   }
 }
 
-template<bool chroma>
+//template<bool chroma>
 void proc0_float_to_float_C(const unsigned char* s0, const float* s1, float* d,
   const int p0, const int p1, const int /*offset_lsb*/)
 {
@@ -157,9 +175,30 @@ void proc0_float_to_float_C(const unsigned char* s0, const float* s1, float* d,
   {
     for (int v = 0; v < p1; ++v) {
       float pix = reinterpret_cast<const float*>(s0)[v];
+      /*
       if constexpr (chroma)
         pix = pix + 0.5f; // chroma center is zero
+      */
       d[v] = pix * s1[v] * scaler;
+    }
+    s0 += p0;
+    s1 += p1;
+    d += p1;
+  }
+}
+
+// stacked16 -> float
+void proc0_stacked16_to_float_C(const unsigned char* s0, const float* s1, float* d,
+  const int p0, const int p1, const int offset_lsb)
+{
+  for (int u = 0; u < p1; ++u)
+  {
+    for (int v = 0; v < p1; ++v)
+    {
+      const int msb = s0[v];
+      const int lsb = s0[v + offset_lsb];
+      const int val = (msb << 8) + lsb;
+      d[v] = val * s1[v] * (1.0f / 256);
     }
     s0 += p0;
     s1 += p1;
@@ -222,25 +261,6 @@ void proc0_uint8_to_float_SSE2_8pixels(const unsigned char* s0, const float* s1,
       auto result_hi = _mm_mul_ps(float4x32_hi, w_hi);
       _mm_storeu_ps(d + v, result_lo);
       _mm_storeu_ps(d + v + 4, result_hi);
-    }
-    s0 += p0;
-    s1 += p1;
-    d += p1;
-  }
-}
-
-// stacked16 -> float
-void proc0_stacked16_to_float_C(const unsigned char* s0, const float* s1, float* d,
-  const int p0, const int p1, const int offset_lsb)
-{
-  for (int u = 0; u < p1; ++u)
-  {
-    for (int v = 0; v < p1; ++v)
-    {
-      const int msb = s0[v];
-      const int lsb = s0[v + offset_lsb];
-      const int val = (msb << 8) + lsb;
-      d[v] = val * s1[v] * (1.0f / 256);
     }
     s0 += p0;
     s1 += p1;
@@ -325,6 +345,73 @@ void proc0_uint16_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1
       // scale back
       result = _mm_mul_ps(result, scaler);
       _mm_storeu_ps(d + v, result);
+    }
+    s0 += p0;
+    s1 += p1;
+    d += p1;
+  }
+}
+
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
+void proc0_float_to_float_SSE2_4pixels(const unsigned char* s0, const float* s1, float* d,
+  const int p0, const int p1, const int /*offset_lsb*/)
+{
+  constexpr float scaler1 = 255.0f; // from 0..1 =-0.5..+0.5 back to the *256 range
+  auto scaler = _mm_set_ps1(scaler1);
+  for (int u = 0; u < p1; ++u)
+  {
+    for (int v = 0; v < p1; v += 4)
+    {
+      // 4x float
+      auto src = _mm_loadu_ps(reinterpret_cast<const float *>(s0 + v * sizeof(float)));
+      // weight
+      auto w = _mm_loadu_ps(s1 + v);
+      auto result = _mm_mul_ps(src, w);
+      // scale back
+      result = _mm_mul_ps(result, scaler);
+      _mm_storeu_ps(d + v, result);
+    }
+    s0 += p0;
+    s1 += p1;
+    d += p1;
+  }
+}
+
+template<int bits_per_pixel>
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
+void proc0_uint16_to_float_SSE2_8pixels(const unsigned char* s0, const float* s1, float* d,
+  const int p0, const int p1, const int /*offset_lsb*/)
+{
+  constexpr float scaler1 = 1.0f / (1 << (bits_per_pixel - 8)); // back to the 0.0 - 255.0 range
+  auto zero = _mm_setzero_si128();
+  auto scaler = _mm_set_ps1(scaler1);
+  for (int u = 0; u < p1; ++u)
+  {
+    for (int v = 0; v < p1; v += 8)
+    {
+      // 4x16
+      auto src = _mm_loadu_si128(reinterpret_cast<const __m128i*>(s0 + v * sizeof(uint16_t)));
+      //4x16->4x32
+      auto int4x32_lo = _mm_unpacklo_epi16(src, zero);
+      auto int4x32_hi = _mm_unpackhi_epi16(src, zero);
+      // int->float
+      auto float4x32_lo = _mm_cvtepi32_ps(int4x32_lo);
+      auto float4x32_hi = _mm_cvtepi32_ps(int4x32_hi);
+      // weight
+      auto w_lo = _mm_loadu_ps(s1 + v);
+      auto w_hi = _mm_loadu_ps(s1 + v + 4);
+      auto result_lo = _mm_mul_ps(float4x32_lo, w_lo);
+      auto result_hi = _mm_mul_ps(float4x32_hi, w_hi);
+      // scale back
+      result_lo = _mm_mul_ps(result_lo, scaler);
+      result_hi = _mm_mul_ps(result_hi, scaler);
+
+      _mm_storeu_ps(d + v, result_lo);
+      _mm_storeu_ps(d + v + 4, result_hi);
     }
     s0 += p0;
     s1 += p1;
@@ -514,7 +601,7 @@ void func_1(void* ps)
   const float f0beta = pss->f0beta;
   const bool uf0b = fabsf(f0beta - 1.0f) < 0.00005f ? false : true;
   const unsigned char** pfplut = pss->pfplut;
-  // fixme hbd: frame pointers here, no hbd special here, ptr is uint8_t* and using pitch only
+  // hbd comment: frame pointers here, no hbd special here, ptr is uint8_t* and using pitch only
   for (int i = 0; i < fc->size; ++i)
     pfplut[i] = fc->frames[fc->getCachePos(i)]->ppf->GetPtr(b) + src_pitch * sheight;
   const int inc = (pss->type & 1) ? sbsize - sosize : 1;
@@ -526,7 +613,7 @@ void func_1(void* ps)
     {
       for (int z = 0; z <= stopz; ++z)
       {
-        // fixme hbd: integer to float conversion here
+        // hbd: integer/float input conversion here to internal float
         pss->proc0(pfplut[z] + x * pss->pixelsize, hw + sbsize * sbsize * z, // fixme: more optim
           dftr + sbsize * sbsize * z, src_pitch, sbsize, offset_lsb);
       }
@@ -943,7 +1030,8 @@ void dfttest::conv_result_plane_to_int(int width, int height, int b, int ebuff_i
     if (bits_per_pixel == 8) {
       if (dither)
         dither_C(ebp, dstp, src_height, src_width, dst_pitch, width, dither);
-      else if (!(src_width & 7) && (((cpuflags & CPUF_SSE2) && opt == 0) || opt == 3 || opt == 2))
+      else if (!(src_width & 7) && // mod 8
+        (((cpuflags & CPUF_SSE2) && opt == 0) || opt >= 2))
         intcast_float_to_uint8_t_SSE2_8pixels(ebp, dstp, src_height, src_width, dst_pitch, width);
       else
         intcast_float_to_uint8_t_C(ebp, dstp, src_height, src_width, dst_pitch, width);
@@ -1066,7 +1154,7 @@ void filter_0_C(float* dftc, const float* sigmas, const int ccnt,
   for (int h = 0; h < ccnt; h += 2)
   {
     const float psd = dftc[h + 0] * dftc[h + 0] + dftc[h + 1] * dftc[h + 1];
-    const float coeff = max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f);
+    const float coeff = max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f); // PF 200324: ? Every 2nd sigma value?
     dftc[h + 0] *= coeff;
     dftc[h + 1] *= coeff;
   }
@@ -1076,21 +1164,24 @@ void filter_0_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2)
 {
   auto zero = _mm_setzero_ps();
-  auto sse_1em15 = _mm_set_ps1(1e-15f);
+  auto sse_1em15 = _mm_set1_ps(1e-15f);
   for (int h = 0; h < ccnt; h += 4)
   {
-    auto dftc_loop = _mm_loadu_ps(dftc + h);
-    auto sigmas_loop = _mm_loadu_ps(sigmas + h);
-    auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
-    auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
-    auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
-    auto sub1_loop = _mm_sub_ps(add1_loop, sigmas_loop);
-    auto add2_loop = _mm_add_ps(add1_loop, sse_1em15);
-    auto rcp1_loop = _mm_rcp_ps(add2_loop);
-    auto mul2_loop = _mm_mul_ps(sub1_loop, rcp1_loop);
-    auto max1_loop = _mm_max_ps(zero, mul2_loop);
-    auto mul3_loop = _mm_mul_ps(dftc_loop, max1_loop);
-    _mm_storeu_ps(dftc + h, mul3_loop);
+    auto dftc_loop = _mm_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm_loadu_ps(sigmas + h); // S S s s adjacent Sigma values should be the same!
+    auto squares = _mm_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm_add_ps(squares, _mm_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+
+    auto diff = _mm_sub_ps(sumofsquares, sigmas_loop); // SQ-S SQ-S sq-s sq-s // . is undefined
+    auto div_as_rcp_of_ss = _mm_rcp_ps(_mm_add_ps(sumofsquares, sse_1em15)); // 1 / (sq+1e-15)
+
+    auto coeff = _mm_max_ps(zero, _mm_mul_ps(diff, div_as_rcp_of_ss));
+    // max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f);
+
+    auto result = _mm_mul_ps(dftc_loop, coeff);
+    _mm_storeu_ps(dftc + h, result);
   }
 }
 
@@ -1110,12 +1201,14 @@ void filter_1_SSE(float* dftc, const float* sigmas, const int ccnt,
 {
   for (int h = 0; h < ccnt; h += 4)
   {
-    auto dftc_loop = _mm_loadu_ps(dftc + h);
-    auto sigmas_loop = _mm_loadu_ps(sigmas + h);
-    auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
-    auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
-    auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
-    auto cmple1_loop = _mm_cmple_ps(sigmas_loop, add1_loop);
+    auto dftc_loop = _mm_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm_loadu_ps(sigmas + h); // S S s s adjacent Sigma values should be the same!
+    auto squares = _mm_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm_add_ps(squares, _mm_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+
+    auto cmple1_loop = _mm_cmple_ps(sigmas_loop, sumofsquares);
     auto and1_loop = _mm_and_ps(cmple1_loop, dftc_loop);
     _mm_storeu_ps(dftc + h, and1_loop);
   }
@@ -1162,28 +1255,44 @@ void filter_3_C(float* dftc, const float* sigmas, const int ccnt,
   }
 }
 
+// mimic sse4.1
+static AVS_FORCEINLINE __m128 _MM_BLENDV_PS(__m128 x, __m128 y, __m128 mask)
+{
+  return _mm_or_ps(_mm_andnot_ps(mask, x), _mm_and_ps(mask, y));
+}
+
 void filter_3_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2)
 {
-  auto sse_ones = _mm_set_ps1(0xFFFFFFFFFFFFFFFF);
   for (int h = 0; h < ccnt; h += 4)
   {
-    auto dftc_loop = _mm_loadu_ps(dftc + h);
-    auto sigmas_loop = _mm_loadu_ps(sigmas + h);
-    auto sigmas2_loop = _mm_loadu_ps(sigmas2 + h);
+    auto dftc_loop = _mm_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm_loadu_ps(sigmas + h); // S S s s adjacent Sigma values should be the same!
+    auto sigmas2_loop = _mm_loadu_ps(sigmas2 + h); // S S s s adjacent Sigma values should be the same!
+    auto squares = _mm_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm_add_ps(squares, _mm_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+
     auto pmin_loop = _mm_loadu_ps(pmin + h);
     auto pmax_loop = _mm_loadu_ps(pmax + h);
-    auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
-    auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
-    auto add1_loop = _mm_add_ps(mul1_loop, shuff_loop);
-    auto cmpnle1_loop = _mm_cmpnle_ps(pmax_loop, add1_loop);
-    auto cmple1_loop = _mm_cmple_ps(pmin_loop, add1_loop);
-    auto and1_loop = _mm_and_ps(cmple1_loop, cmpnle1_loop);
+
+    //if (psd >= pmin[h] && psd <= pmax[h])
+    auto cmp1_loop = _mm_cmple_ps(pmin_loop, sumofsquares);
+    auto cmp2_loop = _mm_cmple_ps(sumofsquares, pmax_loop);
+    auto and1_loop = _mm_and_ps(cmp1_loop, cmp2_loop);
+   
+    // auto sigma_chosen = _mm_blendv_ps(sigmas2_loop, sigmas_loop, and1_loop); // sse4.1
+    auto sigma_chosen = _MM_BLENDV_PS(sigmas2_loop, sigmas_loop, and1_loop); // sse
+#if 0
+    // bug for choosing sigmas fixed in 1.9.6
     auto and2_loop = _mm_and_ps(sigmas_loop, and1_loop);
+    auto sse_ones = _mm_set1_ps(0xFFFFFFFFFFFFFFFF);
     auto xor1_loop = _mm_xor_ps(sse_ones, and1_loop);
     auto and3_loop = _mm_and_ps(xor1_loop, sigmas2_loop);
-    auto  or1_loop = _mm_or_ps(and3_loop, and2_loop);
-    auto mul2_loop = _mm_mul_ps(or1_loop, dftc_loop);
+    auto sigma_chosen = _mm_or_ps(and3_loop, and2_loop);
+#endif
+    auto mul2_loop = _mm_mul_ps(sigma_chosen, dftc_loop);
     _mm_storeu_ps(dftc + h, mul2_loop);
   }
 }
@@ -1206,17 +1315,20 @@ void filter_4_SSE(float* dftc, const float* sigmas, const int ccnt,
   auto sse_1em15 = _mm_set_ps1(1e-15f);
   for (int h = 0; h < ccnt; h += 4)
   {
-    auto dftc_loop = _mm_loadu_ps(dftc + h);
-    auto sigmas_loop = _mm_loadu_ps(sigmas + h);
+    auto dftc_loop = _mm_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm_loadu_ps(sigmas + h); // S S s s adjacent Sigma values should be the same!
+    auto squares = _mm_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm_add_ps(squares, _mm_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+    auto psd = _mm_add_ps(sse_1em15, sumofsquares);
+
     auto pmin_loop = _mm_loadu_ps(pmin + h);
     auto pmax_loop = _mm_loadu_ps(pmax + h);
-    auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
-    auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
-    auto add1_loop = _mm_add_ps(sse_1em15, mul1_loop);
-    auto add2_loop = _mm_add_ps(add1_loop, shuff_loop);
-    auto add3_loop = _mm_add_ps(add2_loop, pmin_loop);
-    auto add4_loop = _mm_add_ps(add2_loop, pmax_loop);
-    auto mul2_loop = _mm_mul_ps(add2_loop, pmax_loop);
+
+    auto add3_loop = _mm_add_ps(psd, pmin_loop);
+    auto add4_loop = _mm_add_ps(psd, pmax_loop);
+    auto mul2_loop = _mm_mul_ps(psd, pmax_loop);
     auto mul3_loop = _mm_mul_ps(add4_loop, add3_loop);
     auto rcp1_loop = _mm_rcp_ps(mul3_loop);
     auto mul4_loop = _mm_mul_ps(rcp1_loop, mul2_loop);
@@ -1227,6 +1339,7 @@ void filter_4_SSE(float* dftc, const float* sigmas, const int ccnt,
   }
 }
 
+// almost the same as filter_0 and filter_6 but with powf
 void filter_5_C(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2)
 {
@@ -1240,6 +1353,9 @@ void filter_5_C(float* dftc, const float* sigmas, const int ccnt,
   }
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("sse2")))
+#endif
 void filter_5_SSE2(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2)
 {
@@ -1248,13 +1364,15 @@ void filter_5_SSE2(float* dftc, const float* sigmas, const int ccnt,
   auto pmin_zero = _mm_set_ps1(pmin[0]);
   for (int h = 0; h < ccnt; h += 4)
   {
-    auto dftc_loop = _mm_loadu_ps(dftc + h);
-    auto sigmas_loop = _mm_loadu_ps(sigmas + h);
-    auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
-    auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
-    auto add1_loop = _mm_add_ps(shuff_loop, mul1_loop);
-    auto sub1_loop = _mm_sub_ps(add1_loop, sigmas_loop);
-    auto add2_loop = _mm_add_ps(sse_1em15, add1_loop);
+    auto dftc_loop = _mm_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm_loadu_ps(sigmas + h); // S S s s adjacent Sigma values should be the same!
+    auto squares = _mm_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm_add_ps(squares, _mm_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+
+    auto sub1_loop = _mm_sub_ps(sumofsquares, sigmas_loop);
+    auto add2_loop = _mm_add_ps(sse_1em15, sumofsquares);
     auto rcp1_loop = _mm_rcp_ps(add2_loop);
     auto mul3_loop = _mm_mul_ps(rcp1_loop, sub1_loop);
     auto max1_loop = _mm_max_ps(zero, mul3_loop);
@@ -1264,6 +1382,7 @@ void filter_5_SSE2(float* dftc, const float* sigmas, const int ccnt,
   }
 }
 
+// same as filter_0 and filter_5 but with sqrt
 void filter_6_C(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2)
 {
@@ -1279,23 +1398,30 @@ void filter_6_C(float* dftc, const float* sigmas, const int ccnt,
 void filter_6_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2)
 {
+  auto zero = _mm_setzero_ps();
   auto sse_1em15 = _mm_set_ps1(1e-15f);
   for (int h = 0; h < ccnt; h += 4)
   {
-    auto dftc_loop = _mm_loadu_ps(dftc + h);
-    auto sigmas_loop = _mm_loadu_ps(sigmas + h);
-    auto mul1_loop = _mm_mul_ps(dftc_loop, dftc_loop);
-    auto shuff_loop = _mm_shuffle_ps(mul1_loop, mul1_loop, 177);
-    auto add1_loop = _mm_add_ps(shuff_loop, mul1_loop);
-    auto sub1_loop = _mm_sub_ps(add1_loop, sigmas_loop);
-    auto add2_loop = _mm_add_ps(sse_1em15, add1_loop);
+    auto dftc_loop = _mm_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm_loadu_ps(sigmas + h); // S S s s adjacent Sigma values should be the same!
+    auto squares = _mm_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm_add_ps(squares, _mm_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+
+    auto sub1_loop = _mm_sub_ps(sumofsquares, sigmas_loop);
+    auto add2_loop = _mm_add_ps(sse_1em15, sumofsquares);
     auto rcp1_loop = _mm_rcp_ps(add2_loop);
-    auto mul2_loop = _mm_mul_ps(rcp1_loop, sub1_loop);
-    auto max1_loop = _mm_max_ps(sse_1em15, mul2_loop);
-    auto rsq1_loop = _mm_rsqrt_ps(max1_loop);
-    auto rcp2_loop = _mm_rcp_ps(rsq1_loop);
-    auto mul3_loop = _mm_mul_ps(dftc_loop, rcp2_loop);
-    _mm_storeu_ps(dftc + h, mul3_loop);
+    auto mul3_loop = _mm_mul_ps(rcp1_loop, sub1_loop);
+    //auto max1_loop = _mm_max_ps(sse_1em15, mul3_loop); // bug fixed in 1.9.6: sse_1em15 instead of zero in max
+    auto max1_loop = _mm_max_ps(zero, mul3_loop);
+#if 0
+    auto rcp2_loop = _mm_rcp_ps(_mm_rsqrt_ps(max1_loop)); // 1.9.6: replacing rsqrt + rcp
+#else
+    auto rcp2_loop = _mm_sqrt_ps(max1_loop); // 1.9.6: replacing rsqrt + rcp
+#endif
+    auto mul4_loop = _mm_mul_ps(dftc_loop, rcp2_loop);
+    _mm_storeu_ps(dftc + h, mul4_loop);
   }
 }
 
@@ -1555,8 +1681,8 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     env->ThrowError("dfttest:  swin must be between 0 and 11 (inclusive)!");
   if (threads < 0 || threads > 16)
     env->ThrowError("dfttest:  threads must be between 0 and 16 (inclusive)!");
-  if (opt < 0 || opt > 3)
-    env->ThrowError("dfttest:  opt must be set to 0, 1, 2, or 3!");
+  if (opt < 0 || opt > 4)
+    env->ThrowError("dfttest:  opt must be set to 0, 1, 2, 3 or 4!");
   if (dither < 0 || dither > 100)
     env->ThrowError("dfttest:  invalid dither value!\n");
   if (threads == 0)
@@ -1829,12 +1955,34 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
     case 12: pssInfo[i]->proc0 = proc0_uint16_to_float_C<12>; break;
     case 14: pssInfo[i]->proc0 = proc0_uint16_to_float_C<14>; break;
     case 16: pssInfo[i]->proc0 = proc0_uint16_to_float_C<16>; break;
-    case 32: pssInfo[i]->proc0 = proc0_float_to_float_C<false>; break; // fixme: do we need chroma moving back to 0..255 range?
+    case 32: pssInfo[i]->proc0 = proc0_float_to_float_C; break; 
+      // fixme: do we need chroma moving back to 0..255 range? probably no.
     }
     pssInfo[i]->proc1 = proc1_C;
-
-    if (((env->GetCPUFlags() & CPUF_AVX) && opt == 0) || opt == 3)
+    pssInfo[i]->removeMean = removeMean_C;
+    pssInfo[i]->addMean = addMean_C;
+    if (ftype == 0)
     {
+      if (fabsf(_f0beta - 1.0f) < 0.00005f)
+        pssInfo[i]->filterCoeffs = filter_0_C;
+      else if (fabsf(_f0beta - 0.5f) < 0.00005f)
+        pssInfo[i]->filterCoeffs = filter_6_C;
+      else
+        pssInfo[i]->filterCoeffs = filter_5_C;
+    }
+    else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_C;
+    else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_C;
+    else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_C;
+    else pssInfo[i]->filterCoeffs = filter_4_C;
+    // end of defaults. simd will override if needed
+
+    const bool useAVX2 = ((env->GetCPUFlags() & CPUF_AVX2) && opt == 0) || opt == 4;
+    const bool useAVX = (((env->GetCPUFlags() & CPUF_AVX) && opt == 0) || opt == 3) || useAVX2;
+    const bool useSSE2 = (((env->GetCPUFlags() & CPUF_SSE2) && opt == 0) || opt == 2) || useAVX;
+
+    if (useSSE2)
+    {
+      
       if (!(sbsize & 3)) // mod4
       {
         switch (bits_per_pixel)
@@ -1844,111 +1992,61 @@ dfttest::dfttest(PClip _child, bool _Y, bool _U, bool _V, int _ftype, float _sig
         case 12: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<12>; break;
         case 14: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<14>; break;
         case 16: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<16>; break;
-        case 32: // no special
-          break;
+        default: // case 32
+          pssInfo[i]->proc0 = proc0_float_to_float_SSE2_4pixels; break;
         }
         pssInfo[i]->proc1 = proc1_SSE_4;
-      }
-      if (!(sbsize & 7)) // mod8
-      {
-        // further specialization
-        switch (bits_per_pixel)
-        {
-        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_8pixels; break;
-        case 10:
-        case 12:
-        case 14:
-        case 16:
-        case 32: 
-          /* no special */ 
-          break;
-        }
-        pssInfo[i]->proc1 = proc1_SSE_8;
-      }
-      pssInfo[i]->removeMean = removeMean_AVX;
-      pssInfo[i]->addMean = addMean_AVX;
-      if (ftype == 0)
-      {
-        if (fabsf(_f0beta - 1.0f) < 0.00005f)
-          pssInfo[i]->filterCoeffs = filter_0_SSE;
-        else if (fabsf(_f0beta - 0.5f) < 0.00005f)
-          pssInfo[i]->filterCoeffs = filter_6_SSE;
-        else
-          pssInfo[i]->filterCoeffs = filter_5_SSE2;
-      }
-      else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_SSE;
-      else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_SSE;
-      else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_SSE;
-      else pssInfo[i]->filterCoeffs = filter_4_SSE;
-    }
-    else if (((env->GetCPUFlags() & CPUF_SSE2) && opt == 0) || opt == 2)
-    {
-      if (!(sbsize & 3)) // mod4
-      {
-        switch (bits_per_pixel)
-        {
-        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_4pixels; break;
-        case 10: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<10>; break;
-        case 12: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<12>; break;
-        case 14: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<14>; break;
-        case 16: pssInfo[i]->proc0 = proc0_uint16_to_float_SSE2_4pixels<16>; break;
-        case 32: /* no special */
-          break;
-        }
-        pssInfo[i]->proc1 = proc1_SSE_4;
-      }
-      if (!(sbsize & 7)) // mod8
-      {
-        // further specialization
-        switch (bits_per_pixel)
-        {
-        case 8: pssInfo[i]->proc0 = proc0_uint8_to_float_SSE2_8pixels; break;
-        case 10:
-        case 12:
-        case 14:
-        case 16:
-        case 32:
-          /* no special */
-          break;
-        }
-        pssInfo[i]->proc1 = proc1_SSE_8;
-      }
-      pssInfo[i]->removeMean = removeMean_SSE;
-      pssInfo[i]->addMean = addMean_SSE;
-      if (ftype == 0)
-      {
-        if (fabsf(_f0beta - 1.0f) < 0.00005f)
-          pssInfo[i]->filterCoeffs = filter_0_SSE;
-        else if (fabsf(_f0beta - 0.5f) < 0.00005f)
-          pssInfo[i]->filterCoeffs = filter_6_SSE;
-        else
-          pssInfo[i]->filterCoeffs = filter_5_SSE2;
-      }
-      else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_SSE;
-      else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_SSE;
-      else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_SSE;
-      else pssInfo[i]->filterCoeffs = filter_4_SSE;
-    }
-    else
-    {
-      // no SIMD, proc0 and proc1 already filled with defaults
+        pssInfo[i]->removeMean = useAVX ? removeMean_AVX : removeMean_SSE;
+        pssInfo[i]->addMean = useAVX ? addMean_AVX : addMean_SSE;
 
-      pssInfo[i]->removeMean = removeMean_C;
-      pssInfo[i]->addMean = addMean_C;
-      if (ftype == 0)
-      {
-        if (fabsf(_f0beta - 1.0f) < 0.00005f)
-          pssInfo[i]->filterCoeffs = filter_0_C;
-        else if (fabsf(_f0beta - 0.5f) < 0.00005f)
-          pssInfo[i]->filterCoeffs = filter_6_C;
-        else
-          pssInfo[i]->filterCoeffs = filter_5_C;
+        if (ftype == 0)
+        {
+          if (fabsf(_f0beta - 1.0f) < 0.00005f)
+            pssInfo[i]->filterCoeffs = filter_0_SSE;
+          else if (fabsf(_f0beta - 0.5f) < 0.00005f)
+            pssInfo[i]->filterCoeffs = filter_6_SSE;
+          else
+            pssInfo[i]->filterCoeffs = filter_5_SSE2;
+
+          pssInfo[i]->filterCoeffs = filter_6_SSE; // debug, to be deleted
+        }
+        else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_SSE;
+        else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_SSE;
+        else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_SSE;
+        else pssInfo[i]->filterCoeffs = filter_4_SSE;
       }
-      else if (ftype == 1) pssInfo[i]->filterCoeffs = filter_1_C;
-      else if (ftype == 2) pssInfo[i]->filterCoeffs = filter_2_C;
-      else if (ftype == 3) pssInfo[i]->filterCoeffs = filter_3_C;
-      else pssInfo[i]->filterCoeffs = filter_4_C;
+      
+      if (!(sbsize & 7)) // mod8
+      {
+        // further specialization
+        switch (bits_per_pixel)
+        {
+        case 8: pssInfo[i]->proc0 = useAVX2 ? proc0_uint8_to_float_AVX2_8pixels : proc0_uint8_to_float_SSE2_8pixels; break;
+        case 10: pssInfo[i]->proc0 = useAVX2 ? proc0_uint16_to_float_AVX2_8pixels<10> : proc0_uint16_to_float_SSE2_8pixels<10>; break;
+        case 12: pssInfo[i]->proc0 = useAVX2 ? proc0_uint16_to_float_AVX2_8pixels<12> : proc0_uint16_to_float_SSE2_8pixels<12>; break;
+        case 14: pssInfo[i]->proc0 = useAVX2 ? proc0_uint16_to_float_AVX2_8pixels<14> : proc0_uint16_to_float_SSE2_8pixels<14>; break;
+        case 16: pssInfo[i]->proc0 = useAVX2 ? proc0_uint16_to_float_AVX2_8pixels<16> : proc0_uint16_to_float_SSE2_8pixels<16>; break;
+        default: // case 32
+          if (useAVX2) pssInfo[i]->proc0 = proc0_float_to_float_AVX2_8pixels; break;
+        }
+        pssInfo[i]->proc1 = useAVX2 ? proc1_AVX2_8 : proc1_SSE_8;
+        // some of these may differ from C, e.g. C has more accurate 1/x, SIMD has only approximate rcp
+        if (ftype == 0)
+        {
+          if (fabsf(_f0beta - 1.0f) < 0.00005f)
+            pssInfo[i]->filterCoeffs = useAVX ? filter_0_AVX_8 : filter_0_SSE; // no spec 8 pixel SSE2
+          else if (fabsf(_f0beta - 0.5f) < 0.00005f)
+            pssInfo[i]->filterCoeffs = useAVX2 ? filter_6_AVX2_8 : filter_6_SSE; // no spec 8 pixel SSE
+          else
+            pssInfo[i]->filterCoeffs = useAVX2 ? filter_5_AVX2_8 : filter_5_SSE2; // no spec 8 pixel SSE
+        }
+        else if (ftype == 1) pssInfo[i]->filterCoeffs = useAVX2 ? filter_1_AVX2_8 : filter_1_SSE;
+        else if (ftype == 2) pssInfo[i]->filterCoeffs = useAVX2 ? filter_2_AVX2_8 : filter_2_SSE; // too simple, probably zero gain, memory bottlenecked
+        else if (ftype == 3) pssInfo[i]->filterCoeffs = useAVX2 ? filter_3_AVX2_8 : filter_3_SSE;
+        else pssInfo[i]->filterCoeffs = useAVX2 ? filter_4_AVX2_8 : filter_4_SSE;
+      }
     }
+
     if (lsb_in_flag)
     {
       // override converter
@@ -2136,7 +2234,7 @@ void dfttest::getNoiseSpectrum(const char* fname, const char* nstring,
       PVideoFrame src = child->GetFrame(npts[ct].fn + z, env);
       prf->copyFrom(src, vi_src);
       const int pitch = prf->GetPitch(npts[ct].b);
-      const unsigned char* srcp = prf->GetPtr(npts[ct].b) + npts[ct].y * pitch + npts[ct].x * vi.ComponentSize(); // fixme more optim.
+      const unsigned char* srcp = prf->GetPtr(npts[ct].b) + npts[ct].y * pitch + npts[ct].x * pixelsize;
       const int offset_lsb = pss->ofs_lsb[npts[ct].b];
       pss->proc0(srcp, hw2 + sbsize * sbsize * z, dftr + sbsize * sbsize * z, pitch, sbsize, offset_lsb);
     }

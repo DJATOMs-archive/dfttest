@@ -1,10 +1,10 @@
 /*
-**                    dfttest v1.9.4.4 for Avisynth+
+**                    dfttest for Avisynth+
 **
 **   2D/3D frequency domain denoiser.
 **
 **   Copyright (C) 2007-2010 Kevin Stone, 2017 (C) DJATOM
-**             (C) 2019 pinterf
+**             (C) 2020 pinterf
 **
 **   This program is free software; you can redistribute it and/or modify
 **   it under the terms of the GNU General Public License as published by
@@ -25,3 +25,5 @@
 
 void removeMean_AVX(float* dftc, const float* dftgc, const int ccnt, float* dftc2);
 void addMean_AVX(float* dftc, const int ccnt, const float* dftc2);
+void filter_0_AVX_8(float* dftc, const float* sigmas, const int ccnt, const float* pmin, const float* pmax, const float* sigmas2);
+

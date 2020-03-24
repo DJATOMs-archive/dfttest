@@ -492,7 +492,7 @@ namespace fmath {
 
 #ifdef __AVX2__
 #if defined(GCC) || defined(CLANG)
-  __attribute__((__target__("fma3,avx2")))
+  __attribute__((__target__("fma,avx2")))
 #endif
 #else
 #if defined(GCC) || defined(CLANG)
@@ -637,7 +637,7 @@ namespace fmath {
 
 #ifdef __AVX2__
 #if defined(GCC) || defined(CLANG)
-  __attribute__((__target__("fma3,avx2")))
+  __attribute__((__target__("fma,avx2")))
 #endif
 #else
 #if defined(GCC) || defined(CLANG)
@@ -706,6 +706,9 @@ namespace fmath {
     return t;
   }
 #ifdef __AVX2__
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("fma,avx2")))
+#endif
   inline __m256 exp_ps256(__m256 x)
   {
     using namespace local;
@@ -771,7 +774,7 @@ namespace fmath {
 
 #ifdef __AVX2__
 #if defined(GCC) || defined(CLANG)
-  __attribute__((__target__("fma3,avx2")))
+  __attribute__((__target__("fma,avx2")))
 #endif
 #else
 #if defined(GCC) || defined(CLANG)
@@ -904,5 +907,20 @@ namespace fmath {
   {
     return exp_pd(_mm_mul_pd(y, log_pd(x)));
   }
+
+  // pinterf addition
+#ifdef __AVX2__
+#if defined(GCC) || defined(CLANG)
+  __attribute__((__target__("fma,avx2")))
+#endif
+  inline __m256 pow_ps256(__m256 x, __m256 y)
+  {
+    auto log1 = log_ps(_mm256_extractf128_ps(x, 0));
+    auto log2 = log_ps(_mm256_extractf128_ps(x, 1));
+    auto log256 = _mm256_castps128_ps256(log1);
+    log256 = _mm256_insertf128_ps(log256, log2, 1);
+    return exp_ps256(_mm256_mul_ps(y, log256));
+  }
+#endif
 
 } // fmath

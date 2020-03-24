@@ -77,15 +77,23 @@ void filter_3_C(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
 void filter_4_C(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
+void filter_5_C(float* dftc, const float* sigmas, const int ccnt,
+  const float* pmin, const float* pmax, const float* sigmas2);
+void filter_6_C(float* dftc, const float* sigmas, const int ccnt,
+  const float* pmin, const float* pmax, const float* sigmas2);
 void filter_0_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
 void filter_1_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
 void filter_2_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
-void filter_3_SSE(float* dftc, const float* sigmas, const int ccnt,
+void filter_3_SSE4(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
 void filter_4_SSE(float* dftc, const float* sigmas, const int ccnt,
+  const float* pmin, const float* pmax, const float* sigmas2);
+void filter_5_SSE2(float* dftc, const float* sigmas, const int ccnt,
+  const float* pmin, const float* pmax, const float* sigmas2);
+void filter_6_SSE(float* dftc, const float* sigmas, const int ccnt,
   const float* pmin, const float* pmax, const float* sigmas2);
 
 void proc0_uint8_to_float_C(const unsigned char* s0, const float* s1, float* d,
@@ -179,9 +187,8 @@ class dfttest : public GenericVideoFilter
 private:
   int bits_per_pixel;
   int pixelsize;
-   
   bool Y, U, V, zmean, lsb_in_flag, lsb_out_flag, quiet_flag;
-  int proc_height;	// Real processing height, not depending on the 8/16 bit stuff.
+  int proc_height; // Real processing height, not depending on the 8/16 bit stacked16 stuff.
   int sbsize, smode, sosize, swin;
   int tbsize, tmode, tosize, twin;
   int noxl, noyl, noxc, noyc;

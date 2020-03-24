@@ -60,3 +60,34 @@ void addMean_AVX(float* dftc, const int ccnt, const float* dftc2)
   _mm256_zeroupper();
 }
 
+#if defined(GCC) || defined(CLANG)
+__attribute__((__target__("avx")))
+#endif
+void filter_0_AVX_8(float* dftc, const float* sigmas, const int ccnt,
+  const float* pmin, const float* pmax, const float* sigmas2)
+{
+  auto zero = _mm256_setzero_ps();
+  auto sse_1em15 = _mm256_set1_ps(1e-15f);
+  for (int h = 0; h < ccnt; h += 8)
+  {
+    auto dftc_loop = _mm256_loadu_ps(dftc + h); // R I r i
+    auto sigmas_loop = _mm256_loadu_ps(sigmas + h); // S S s s // FIXME check: adjacent Sigma values should be the same!
+    auto squares = _mm256_mul_ps(dftc_loop, dftc_loop); //R*R I*I r*r i*i
+
+    auto sumofsquares = _mm256_add_ps(squares, _mm256_shuffle_ps(squares, squares, _MM_SHUFFLE(2, 3, 0, 1)));
+    // R*R+I*I R*R+I*I r*r+i*i r*r+i*i from now SQ SQ sq sq
+
+    auto diff = _mm256_sub_ps(sumofsquares, sigmas_loop); // SQ-S SQ-S sq-s sq-s // . is undefined
+    // 1/x approximation, this part is giving a bit different result as C code
+    // _mm256_rcp14_ps is not usable here it's AVX512
+    auto div_as_rcp_of_ss = _mm256_rcp_ps(_mm256_add_ps(sumofsquares, sse_1em15)); // 1 / (sq+1e-15)
+
+    auto coeff = _mm256_max_ps(zero, _mm256_mul_ps(diff, div_as_rcp_of_ss));
+    // max((psd - sigmas[h]) / (psd + 1e-15f), 0.0f);
+
+    auto result = _mm256_mul_ps(dftc_loop, coeff);
+    _mm256_storeu_ps(dftc + h, result);
+  }
+  _mm256_zeroupper();
+}
+
