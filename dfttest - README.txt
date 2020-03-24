@@ -1,5 +1,5 @@
 
-                                       dfttest v1.9.5
+                                       dfttest v1.9.6
                                        Original code by tritical
                                        16-bit modification by Firesledge
                                        Avs+ port by DJATOM
@@ -407,6 +407,7 @@ Parameters:
           1 - c routines
           2 - sse/sse2 routines
           3 - sse/sse2/avx routines
+          4 - sse/sse2/avx/avx2 routines
 
        default:  0
 
@@ -584,10 +585,16 @@ Parameters:
 
 Changes:
 
+2020.03.24 v1.9.6
+  - Enhanced: avx2 routines for mod-8 sbsize cases
+  - parameter opt allow 4 for avx2
+  - fix: a very broken filter_3_sse (ftype = 3)
+  - fix: filter_6_sse: number limited with 1e-15 instead of 0 (used in an ftype = 0 sub-case)
+  - filter_6_sse: replacing (rsqrt+rcp) with direct sqrt, more accurate and not slower
+
 2020.03.23 v1.9.5
   - Avisynth+ high bit depth support 10-32 bits (base version, needs more optimization)
-    new formats: planar RGB
-    Y (greyscale)
+    new formats: planar RGB and Y (greyscale)
   - Fix: minor image noise at stacked16 input (lsb_in = true)
     proc0_16_SSE2 contained a bug: every 2nd pixel contains traces of the lsb part of pixels 4 positions to the right
     Regression since 1.9.4
